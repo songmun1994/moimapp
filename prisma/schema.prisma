@@ -1,0 +1,253 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model adjustment_logs {
+  id            BigInt      @id @default(autoincrement()) @db.UnsignedBigInt
+  settlement_id BigInt      @db.UnsignedBigInt
+  member_id     BigInt      @db.UnsignedBigInt
+  change_amount Decimal     @db.Decimal(12, 2)
+  reason        String?     @db.VarChar(255)
+  created_at    DateTime    @default(now()) @db.DateTime(0)
+  members       members     @relation(fields: [member_id], references: [id], onDelete: Cascade, map: "fk_adjustment_logs_member")
+  settlements   settlements @relation(fields: [settlement_id], references: [id], onDelete: Cascade, map: "fk_adjustment_logs_settlement")
+
+  @@index([member_id], map: "idx_adjustment_logs_member_id")
+  @@index([settlement_id], map: "idx_adjustment_logs_settlement_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model expense_members {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  expense_id   BigInt   @db.UnsignedBigInt
+  member_id    BigInt   @db.UnsignedBigInt
+  amount_share Decimal? @db.Decimal(12, 2)
+  created_at   DateTime @default(now()) @db.DateTime(0)
+  expenses     expenses @relation(fields: [expense_id], references: [id], onDelete: Cascade, map: "fk_expense_members_expense")
+  members      members  @relation(fields: [member_id], references: [id], onDelete: Cascade, map: "fk_expense_members_member")
+
+  @@unique([expense_id, member_id], map: "uk_expense_members")
+  @@index([member_id], map: "fk_expense_members_member")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model expenses {
+  id              BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id      BigInt            @db.UnsignedBigInt
+  day_number      Int?
+  place_name      String            @db.VarChar(150)
+  merchant_name   String?           @db.VarChar(150)
+  merchant_address String?          @db.VarChar(255)
+  amount          Decimal           @db.Decimal(12, 2)
+  image_url       String?           @db.VarChar(500)
+  receipt_url     String?           @db.VarChar(500)
+  memo            String?           @db.VarChar(255)
+  spent_date      DateTime?         @db.Date
+  created_at      DateTime          @default(now()) @db.DateTime(0)
+  updated_at      DateTime          @default(now()) @db.DateTime(0)
+  expense_members expense_members[]
+  meetings        meetings          @relation(fields: [meeting_id], references: [id], onDelete: Cascade, map: "fk_expenses_meeting")
+
+  @@index([day_number], map: "idx_expenses_day_number")
+  @@index([meeting_id], map: "idx_expenses_meeting_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model invoices {
+  id                    BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id            BigInt                @db.UnsignedBigInt
+  settlement_id         BigInt                @db.UnsignedBigInt
+  invoice_type          invoices_invoice_type
+  member_id             BigInt?               @db.UnsignedBigInt
+  receiver_name         String                @db.VarChar(50)
+  billed_amount         Decimal               @db.Decimal(12, 2)
+  issued_date           DateTime              @db.Date
+  invoice_snapshot_json Json?
+  image_url             String?               @db.VarChar(500)
+  created_at            DateTime              @default(now()) @db.DateTime(0)
+  updated_at            DateTime              @default(now()) @db.DateTime(0)
+  meetings              meetings              @relation(fields: [meeting_id], references: [id], onDelete: Cascade, map: "fk_invoices_meeting")
+  members               members?              @relation(fields: [member_id], references: [id], map: "fk_invoices_member")
+  settlements           settlements           @relation(fields: [settlement_id], references: [id], onDelete: Cascade, map: "fk_invoices_settlement")
+  share_logs            share_logs[]
+
+  @@index([meeting_id], map: "idx_invoices_meeting_id")
+  @@index([member_id], map: "idx_invoices_member_id")
+  @@index([settlement_id], map: "idx_invoices_settlement_id")
+  @@index([invoice_type], map: "idx_invoices_type")
+}
+
+model meeting_group_members {
+  id             BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
+  group_id       BigInt         @db.UnsignedBigInt
+  member_name    String         @db.VarChar(50)
+  sort_order     Int            @default(0)
+  created_at     DateTime       @default(now()) @db.DateTime(0)
+  meeting_groups meeting_groups @relation(fields: [group_id], references: [id], onDelete: Cascade, map: "fk_meeting_group_members_group")
+
+  @@index([group_id], map: "idx_meeting_group_members_group_id")
+}
+
+model meeting_groups {
+  id                    BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
+  group_name            String                  @db.VarChar(100)
+  description           String?                 @db.VarChar(255)
+  created_at            DateTime                @default(now()) @db.DateTime(0)
+  updated_at            DateTime                @default(now()) @db.DateTime(0)
+  meeting_group_members meeting_group_members[]
+  meetings              meetings[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model meeting_schedules {
+  id                      BigInt                           @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id              BigInt                           @unique(map: "uk_meeting_schedules_meeting_id") @db.UnsignedBigInt
+  recurring_type          meeting_schedules_recurring_type
+  recurring_day_of_week   Int?
+  recurring_day_of_month  Int?
+  recurring_month_of_year Int?
+  created_at              DateTime                         @default(now()) @db.DateTime(0)
+  updated_at              DateTime                         @default(now()) @db.DateTime(0)
+  meetings                meetings                         @relation(fields: [meeting_id], references: [id], onDelete: Cascade, map: "fk_meeting_schedules_meeting")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model meetings {
+  id                BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
+  public_token      String                 @unique(map: "uk_meetings_public_token") @db.Char(36)
+  edit_token        String?                @unique(map: "uk_meetings_edit_token") @db.Char(36)
+  meeting_group_id  BigInt?                @db.UnsignedBigInt
+  meeting_name      String                 @db.VarChar(100)
+  description       String?                @db.VarChar(255)
+  cover_image_url   String?                @db.VarChar(500)
+  meeting_type      meetings_meeting_type  @default(normal)
+  duration_type     meetings_duration_type @default(short_term)
+  meeting_date      DateTime?              @db.Date
+  start_date        DateTime?              @db.Date
+  end_date          DateTime?              @db.Date
+  upfront_dues      Decimal                @default(0.00) @db.Decimal(12, 2)
+  member_count      Int                    @default(1)
+  account_bank      String?                @db.VarChar(50)
+  account_number    String?                @db.VarChar(100)
+  account_holder    String?                @db.VarChar(50)
+  status            meetings_status        @default(draft)
+  settlement_note   String?                @db.VarChar(255)
+  created_at        DateTime               @default(now()) @db.DateTime(0)
+  updated_at        DateTime               @default(now()) @db.DateTime(0)
+  expenses          expenses[]
+  invoices          invoices[]
+  meeting_schedules meeting_schedules?
+  meeting_groups    meeting_groups?        @relation(fields: [meeting_group_id], references: [id], map: "fk_meetings_group")
+  members           members[]
+  settlements       settlements?
+  share_logs        share_logs[]
+
+  @@index([meeting_group_id], map: "idx_meetings_group_id")
+  @@index([status], map: "idx_meetings_status")
+}
+
+model members {
+  id                        BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id                BigInt                      @db.UnsignedBigInt
+  name                      String                      @db.VarChar(50)
+  nickname                  String?                     @db.VarChar(50)
+  sort_order                Int                         @default(0)
+  created_at                DateTime                    @default(now()) @db.DateTime(0)
+  updated_at                DateTime                    @default(now()) @db.DateTime(0)
+  adjustment_logs           adjustment_logs[]
+  expense_members           expense_members[]
+  invoices                  invoices[]
+  meetings                  meetings                    @relation(fields: [meeting_id], references: [id], onDelete: Cascade, map: "fk_members_meeting")
+  settlement_member_amounts settlement_member_amounts[]
+
+  @@index([meeting_id], map: "idx_members_meeting_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model settlement_member_amounts {
+  id              BigInt      @id @default(autoincrement()) @db.UnsignedBigInt
+  settlement_id   BigInt      @db.UnsignedBigInt
+  member_id       BigInt      @db.UnsignedBigInt
+  base_amount     Decimal     @default(0.00) @db.Decimal(12, 2)
+  adjusted_amount Decimal     @default(0.00) @db.Decimal(12, 2)
+  final_amount    Decimal     @default(0.00) @db.Decimal(12, 2)
+  created_at      DateTime    @default(now()) @db.DateTime(0)
+  updated_at      DateTime    @default(now()) @db.DateTime(0)
+  members         members     @relation(fields: [member_id], references: [id], onDelete: Cascade, map: "fk_settlement_member_amounts_member")
+  settlements     settlements @relation(fields: [settlement_id], references: [id], onDelete: Cascade, map: "fk_settlement_member_amounts_settlement")
+
+  @@unique([settlement_id, member_id], map: "uk_settlement_member_amounts")
+  @@index([member_id], map: "idx_settlement_member_amounts_member_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model settlements {
+  id                        BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id                BigInt                      @unique(map: "uk_settlements_meeting_id") @db.UnsignedBigInt
+  total_amount              Decimal                     @default(0.00) @db.Decimal(12, 2)
+  base_amount_per_person    Decimal                     @default(0.00) @db.Decimal(12, 2)
+  adjustment_balance        Decimal                     @default(0.00) @db.Decimal(12, 2)
+  is_finalized              Boolean                     @default(false)
+  finalized_at              DateTime?                   @db.DateTime(0)
+  created_at                DateTime                    @default(now()) @db.DateTime(0)
+  updated_at                DateTime                    @default(now()) @db.DateTime(0)
+  adjustment_logs           adjustment_logs[]
+  invoices                  invoices[]
+  settlement_member_amounts settlement_member_amounts[]
+  meetings                  meetings                    @relation(fields: [meeting_id], references: [id], onDelete: Cascade, map: "fk_settlements_meeting")
+
+  @@index([is_finalized], map: "idx_settlements_finalized")
+}
+
+model share_logs {
+  id         BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id BigInt                @db.UnsignedBigInt
+  invoice_id BigInt?               @db.UnsignedBigInt
+  share_type share_logs_share_type
+  created_at DateTime              @default(now()) @db.DateTime(0)
+  invoices   invoices?             @relation(fields: [invoice_id], references: [id], map: "fk_share_logs_invoice")
+  meetings   meetings              @relation(fields: [meeting_id], references: [id], onDelete: Cascade, map: "fk_share_logs_meeting")
+
+  @@index([invoice_id], map: "idx_share_logs_invoice_id")
+  @@index([meeting_id], map: "idx_share_logs_meeting_id")
+}
+
+enum meeting_schedules_recurring_type {
+  weekly
+  monthly
+  yearly
+}
+
+enum invoices_invoice_type {
+  common
+  individual
+}
+
+enum share_logs_share_type {
+  capture
+  image
+  link
+}
+
+enum meetings_meeting_type {
+  travel
+  normal
+}
+
+enum meetings_duration_type {
+  short_term
+  long_term
+}
+
+enum meetings_status {
+  draft
+  adjusting
+  settled
+  archived
+}
