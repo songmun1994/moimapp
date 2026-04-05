@@ -1,0 +1,19 @@
+services:
+  moim-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moim-service
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+      - NODE_ENV=production
+    networks:
+      - common-network
+
+networks:
+  common-network:
+    external: true
