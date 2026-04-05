@@ -7,10 +7,14 @@ services:
     restart: always
     ports:
       - "3000:3000"
+    env_file:
+      - .env
     environment:
       - HOSTNAME=0.0.0.0
       - PORT=3000
       - NODE_ENV=production
+    volumes:
+      - /home/song/moim-app/uploads:/app/public/moim/uploads
     networks:
       - common-network
 

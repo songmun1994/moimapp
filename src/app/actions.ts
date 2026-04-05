@@ -19,7 +19,7 @@ async function saveFile(file: File | null): Promise<string | null> {
   const bytes = await file.arrayBuffer();
   const buffer = Buffer.from(bytes);
   
-  const uploadDir = path.join(process.cwd(), "public/uploads");
+  const uploadDir = path.join(process.cwd(), "public/moim/uploads");
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
   }
@@ -29,7 +29,7 @@ async function saveFile(file: File | null): Promise<string | null> {
   const filePath = path.join(uploadDir, fileName);
   fs.writeFileSync(filePath, buffer);
   
-  return `/uploads/${fileName}`; // 브라우저가 읽을 경로
+  return `/moim/uploads/${fileName}`; // 브라우저가 읽을 경로
 }
 
 // 1. 모임 생성 액션
