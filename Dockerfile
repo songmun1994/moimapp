@@ -37,17 +37,16 @@ RUN adduser --system --uid 1001 nextjs
 
 COPY --from=builder /app/public ./public
 
-# Prerender 캐시 권한 설정
+# Set the correct permission for prerender cache
 RUN mkdir .next
-RUN chown nextjs:nodejs .next
 
 # Standalone 빌드 결과물 복사
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-USER nextjs
+# 볼륨 마운트 시 폴더 권한 문제(Permission denied)를 피하기 위해 기본 사용자(root)로 실행합니다.
+# USER nextjs
 
 EXPOSE 3000
-
-# server.js는 이제 0.0.0.0:3000 주소로 모든 요청을 수신합니다.
+ENV PORT=3000
 CMD ["node", "server.js"]
