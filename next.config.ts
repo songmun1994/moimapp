@@ -5,7 +5,8 @@ const nextConfig: NextConfig = {
   output: "standalone",
   experimental: {
     serverActions: {
-      allowedOrigins: ["moim.munsong.app:8443", "localhost:3000", "moim.munsong.app"],
+      allowedOrigins: ["moim.munsong.app:8443", "localhost:3000"],
+      bodySizeLimit: "50mb",
     },
   },
 };

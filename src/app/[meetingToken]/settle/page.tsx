@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Check, AlertCircle, RotateCcw, Home } from "lucide-react";
-import { getMeetingAction, getExpensesAction } from "@/app/actions";
+import { ChevronLeft, Check, AlertCircle, RotateCcw, Home, Sparkles } from "lucide-react";
+import { getMeetingAction, getExpensesAction, getFundPaymentsAction } from "@/app/actions";
 
 export default function SettlePage(props: { params: Promise<{ meetingToken: string }> }) {
   const params = use(props.params);
@@ -12,25 +12,33 @@ export default function SettlePage(props: { params: Promise<{ meetingToken: stri
   const [totalAmount, setTotalAmount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [memberStates, setMemberStates] = useState<any[]>([]);
+  const [fundsPayments, setFundsPayments] = useState<any[]>([]);
 
   useEffect(() => {
     async function load() {
       try {
-        const mtg = await getMeetingAction(params.meetingToken);
-        const exps = await getExpensesAction(params.meetingToken);
+        const [mtg, exps, funds] = await Promise.all([
+          getMeetingAction(params.meetingToken),
+          getExpensesAction(params.meetingToken),
+          getFundPaymentsAction(params.meetingToken)
+        ]);
         if (!mtg) {
            router.push("/home");
            return;
         }
         
         setMeeting(mtg);
+        setFundsPayments(funds);
         const sum = exps.reduce((acc: number, curr: any) => acc + Number(curr.amount), 0);
         setTotalAmount(sum);
         
         // n빵 세팅
         if (mtg.members.length > 0) {
            const newBase = Math.floor(sum / mtg.members.length);
-           setMemberStates(mtg.members.map((m: any) => ({ name: m.name, base: newBase, adjusted: 0 })));
+           setMemberStates(mtg.members.map((m: any) => {
+             const paid = funds.filter((f: any) => f.member_id.toString() === m.id.toString()).reduce((a: number, b: any) => a + Number(b.amount), 0);
+             return { id: m.id.toString(), name: m.name, base: newBase, adjusted: 0, paid };
+           }));
         }
       } catch (e) {
         console.error(e);
@@ -50,13 +58,47 @@ export default function SettlePage(props: { params: Promise<{ meetingToken: stri
 
   const totalAllocated = memberStates.reduce((acc, curr) => acc + curr.base + curr.adjusted, 0);
   const balance = totalAmount - totalAllocated;
-  const totalPot = Number(meeting?.upfront_dues || 0) * (meeting?.members?.length || 1);
+  const totalPot = fundsPayments.reduce((acc, curr) => acc + Number(curr.amount), 0);
   const remainingPot = totalPot - totalAmount;
 
   const handleAdjust = (idx: number, diff: number) => {
     const newMembers = [...memberStates];
     if (newMembers[idx].base + newMembers[idx].adjusted + diff < 0) return;
     newMembers[idx].adjusted += diff;
+    setMemberStates(newMembers);
+  };
+
+  const handleAutoBalance = () => {
+    if (balance === 0 || memberStates.length <= 1) return;
+    const newMembers = [...memberStates];
+    
+    // Distribute balance evenly among all members (or those who didn't trigger the unbalance)
+    // To keep it simple: just distribute the remainder (balance) evenly to everyone except the one who has biggest adjustment?
+    // Actually, just distribute Math.floor(balance / count) to everyone
+    
+    // Instead, let's distribute the balance iteratively to lowest allocated people
+    let remainder = balance;
+    let iterations = 0;
+    while(remainder !== 0 && iterations < 1000) {
+      const step = remainder > 0 ? 1 : -1;
+      // find member with lowest allocated if positive remainder, else highest if negative
+      let targetIdx = 0;
+      let targetVal = step > 0 ? Infinity : -Infinity;
+      
+      for(let i=0; i<newMembers.length; i++) {
+        const val = newMembers[i].base + newMembers[i].adjusted;
+        if ((step > 0 && val < targetVal) || (step < 0 && val > targetVal)) {
+          // If we need to subtract, ensure we don't go below 0
+          if (step < 0 && val <= 0) continue; 
+          targetVal = val;
+          targetIdx = i;
+        }
+      }
+      
+      newMembers[targetIdx].adjusted += step;
+      remainder -= step;
+      iterations++;
+    }
     setMemberStates(newMembers);
   };
 
@@ -109,12 +151,20 @@ export default function SettlePage(props: { params: Promise<{ meetingToken: stri
         <div className="space-y-4 flex-1">
           <div className="flex items-center justify-between mb-4 mt-2">
             <h3 className="font-bold text-toss-text text-lg">개인별 금액 조정</h3>
-            <button 
-              onClick={handleDivideN} 
-              className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-lg text-sm flex items-center transition-colors"
-            >
-              <RotateCcw className="w-3 h-3 mr-1" /> 1/N 리셋
-            </button>
+            <div className="flex gap-2">
+              <button 
+                onClick={handleAutoBalance} 
+                className="px-3 py-1.5 bg-blue-50 text-toss-blue font-bold rounded-lg text-sm flex items-center transition-colors shadow-sm"
+              >
+                <Sparkles className="w-3.5 h-3.5 mr-1" /> 자동 분배
+              </button>
+              <button 
+                onClick={handleDivideN} 
+                className="px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-lg text-sm flex items-center transition-colors shadow-sm"
+              >
+                <RotateCcw className="w-3.5 h-3.5 mr-1" /> 리셋
+              </button>
+            </div>
           </div>
           
           <p className="text-sm text-gray-500 font-medium mb-6 bg-gray-100 p-3 rounded-xl leading-relaxed">
@@ -125,11 +175,11 @@ export default function SettlePage(props: { params: Promise<{ meetingToken: stri
             <div key={idx} className="border border-gray-100 rounded-2xl p-5 shadow-sm bg-white mb-3">
               <div className="flex justify-between items-center mb-4">
                 <span className="font-bold text-lg text-toss-text">{m.name}</span>
-                <span className={`font-extrabold text-2xl tracking-tight ${(m.base + m.adjusted - Number(meeting.upfront_dues || 0)) > 0 ? 'text-red-500' : (m.base + m.adjusted - Number(meeting.upfront_dues || 0)) < 0 ? 'text-toss-blue' : 'text-gray-400'}`}>
-                  {(m.base + m.adjusted - Number(meeting.upfront_dues || 0)) > 0 
-                    ? `추가 ${(m.base + m.adjusted - Number(meeting.upfront_dues || 0)).toLocaleString()}원` 
-                    : (m.base + m.adjusted - Number(meeting.upfront_dues || 0)) < 0 
-                      ? `환급 ${Math.abs(m.base + m.adjusted - Number(meeting.upfront_dues || 0)).toLocaleString()}원` 
+                <span className={`font-extrabold text-2xl tracking-tight ${(m.base + m.adjusted - m.paid) > 0 ? 'text-red-500' : (m.base + m.adjusted - m.paid) < 0 ? 'text-toss-blue' : 'text-gray-400'}`}>
+                  {(m.base + m.adjusted - m.paid) > 0 
+                    ? `송금 ${(m.base + m.adjusted - m.paid).toLocaleString()}원` 
+                    : (m.base + m.adjusted - m.paid) < 0 
+                      ? `환급 ${Math.abs(m.base + m.adjusted - m.paid).toLocaleString()}원` 
                       : `정산 완료`}
                 </span>
               </div>
@@ -138,10 +188,10 @@ export default function SettlePage(props: { params: Promise<{ meetingToken: stri
                   <span>사용 금액 (기본 1/N)</span>
                   <span>{(m.base + m.adjusted).toLocaleString()}원</span>
                 </div>
-                {Number(meeting.upfront_dues || 0) > 0 && (
+                {m.paid > 0 && (
                   <div className="flex justify-between mb-3 text-sm text-toss-blue font-semibold px-1">
-                    <span>사전 납부 회비</span>
-                    <span>- {Number(meeting.upfront_dues).toLocaleString()}원</span>
+                    <span>납부 내역 (공금/회비)</span>
+                    <span>- {m.paid.toLocaleString()}원</span>
                   </div>
                 )}
                 <div className="grid grid-cols-4 gap-1.5 mt-2">
@@ -164,13 +214,24 @@ export default function SettlePage(props: { params: Promise<{ meetingToken: stri
           <button 
             disabled={balance !== 0}
             onClick={() => {
-              // 추후 이 데이터를 Base64 파라미터나 상태, 또는 DB(settlement 테이블)에 박제할 수 있음. 
-              // 현재는 0원 검증 후 프론트엔드 라우팅 (Invoice에서 금액 재분배)
-              router.push(`/${params.meetingToken}/invoice`);
+              // Serialize member data to localStorage to be printed into image on next page
+              localStorage.setItem(`settle_${params.meetingToken}`, JSON.stringify({
+                totalPot,
+                remainingPot,
+                totalAmount,
+                memberStates,
+                meetingName: meeting.meeting_name,
+                bankInfo: {
+                  bank: meeting.account_bank,
+                  account: meeting.account_number,
+                  holder: meeting.account_holder
+                }
+              }));
+              router.push(`/${params.meetingToken}/receipt`);
             }}
-            className="toss-button py-5 text-lg w-full tracking-wide disabled:bg-gray-200 disabled:text-gray-400 shadow-xl inline-flex items-center justify-center"
+            className="toss-button py-5 text-lg w-full tracking-wide disabled:bg-gray-200 disabled:text-gray-400 shadow-xl inline-flex items-center justify-center font-bold"
           >
-            {balance === 0 ? "정산 마치기" : "잔액을 0원으로 맞춰주세요"}
+            {balance === 0 ? "정산 영수증 만들기" : "잔액을 0원으로 맞춰주세요"}
           </button>
         </div>
       </div>

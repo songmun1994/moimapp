@@ -7,7 +7,7 @@ import { createMeetingAction } from "@/app/actions";
 
 export default function CreateMeeting() {
   const router = useRouter();
-  const { name, description, duration_type, memberCount, upfrontDues, members, bankInfo, scheduleType, scheduleDay, setField } = useMeetingStore();
+  const { name, description, duration_type, memberCount, upfrontDues, members, bankInfo, scheduleType, scheduleDay, recurringAmount, setField } = useMeetingStore();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   
@@ -41,6 +41,7 @@ export default function CreateMeeting() {
         if (duration_type === 'long_term' && scheduleType !== 'none') {
           formData.append("scheduleType", scheduleType);
           if (scheduleDay !== null) formData.append("scheduleDay", scheduleDay.toString());
+          formData.append("recurringAmount", recurringAmount.toString());
         }
         if (coverFile) formData.append("coverImage", coverFile);
 
@@ -127,23 +128,6 @@ export default function CreateMeeting() {
               value={description} 
               onChange={(e) => setField({ description: e.target.value })} 
             />
-            <label className="text-sm font-bold text-toss-text-secondary mb-2 block">모임 유형</label>
-            <div className="flex space-x-3 mb-6">
-              <button 
-                onClick={() => setField({ duration_type: 'short_term' })}
-                className={`flex-1 flex flex-col items-center justify-center py-5 rounded-2xl transition-all border-2 ${duration_type === 'short_term' ? 'border-toss-blue bg-blue-50 text-toss-blue' : 'border-gray-100 bg-gray-50 text-gray-500'}`}
-              >
-                <CalendarDays className="w-6 h-6 mb-2" />
-                <span className="font-bold">단기 (여행)</span>
-              </button>
-              <button 
-                onClick={() => setField({ duration_type: 'long_term' })}
-                className={`flex-1 flex flex-col items-center justify-center py-5 rounded-2xl transition-all border-2 ${duration_type === 'long_term' ? 'border-toss-blue bg-blue-50 text-toss-blue' : 'border-gray-100 bg-gray-50 text-gray-500'}`}
-              >
-                <History className="w-6 h-6 mb-2" />
-                <span className="font-bold">장기 (정기)</span>
-              </button>
-            </div>
           </div>
         )}
 
@@ -190,93 +174,120 @@ export default function CreateMeeting() {
 
         {step === 4 && (
           <div className="flex flex-col h-full animate-in slide-in-from-right-4 duration-300 fill-mode-both">
-            <h2 className="text-2xl font-bold mb-2">미리 걷을 회비가 있으신가요?</h2>
-            <p className="text-sm font-medium text-toss-text-secondary mb-8">
-              나중에 한 번에 정산할 예정이라면 0원으로 두세요.
-            </p>
-            <div className="flex items-center mb-6 border border-gray-200 rounded-2xl px-4 py-2 bg-gray-50 focus-within:border-toss-blue focus-within:bg-white transition-colors">
-              <span className="text-3xl font-bold text-gray-400 mr-2">₩</span>
-              <input 
-                type="text" inputMode="numeric"
-                className="bg-transparent text-3xl font-extrabold text-toss-text w-full outline-none py-4" 
-                value={upfrontDues ? upfrontDues.toLocaleString() : ''} 
-                onChange={(e) => {
-                  const val = e.target.value.replace(/,/g, '');
-                  if (val === '') setField({ upfrontDues: 0 });
-                  else if (!isNaN(Number(val))) setField({ upfrontDues: Number(val) });
-                }} 
-                placeholder="0"
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              {[10000, 30000, 50000].map(amt => (
-                <button
-                  key={amt}
-                  onClick={() => setField({ upfrontDues: upfrontDues + amt })}
-                  className="py-4 bg-blue-50 text-toss-blue rounded-xl font-bold active:bg-blue-100"
-                >+{amt/10000}만</button>
-              ))}
-            </div>
-            <button
-               onClick={() => setField({ upfrontDues: 0 })}
-               className="mt-4 text-center text-toss-text-secondary font-semibold py-3 border border-gray-200 rounded-xl mb-6"
-            >
-               초기화 (0원)
-            </button>
+            <h2 className="text-2xl font-bold mb-4">공금(회비)를<br/>미리 걷을 예정인가요?</h2>
             
-            {duration_type === 'long_term' && upfrontDues > 0 && (
-               <div className="bg-gray-50 border border-gray-100 rounded-2xl p-5 mb-4 animate-in fade-in zoom-in duration-300">
-                 <h3 className="font-bold text-toss-text mb-4 text-sm">정기 납부 일정을 설정할까요?</h3>
-                 
-                 <div className="flex space-x-2 mb-4">
-                   <button 
-                     onClick={() => setField({ scheduleType: 'none', scheduleDay: null })}
-                     className={`flex-1 py-2 rounded-lg font-bold text-sm border-2 transition-all ${scheduleType === 'none' ? 'border-toss-blue bg-blue-50 text-toss-blue' : 'border-gray-200 bg-white text-gray-500'}`}
-                   >비정기적</button>
-                   <button 
-                     onClick={() => setField({ scheduleType: 'weekly', scheduleDay: 1 })}
-                     className={`flex-1 py-2 rounded-lg font-bold text-sm border-2 transition-all ${scheduleType === 'weekly' ? 'border-toss-blue bg-blue-50 text-toss-blue' : 'border-gray-200 bg-white text-gray-500'}`}
-                   >매주</button>
-                   <button 
-                     onClick={() => setField({ scheduleType: 'monthly', scheduleDay: 1 })}
-                     className={`flex-1 py-2 rounded-lg font-bold text-sm border-2 transition-all ${scheduleType === 'monthly' ? 'border-toss-blue bg-blue-50 text-toss-blue' : 'border-gray-200 bg-white text-gray-500'}`}
-                   >매월</button>
+            <div className="flex space-x-3 mb-8">
+               <button 
+                 onClick={() => setField({ duration_type: 'short_term', upfrontDues: 0, scheduleType: 'none', recurringAmount: 0 })}
+                 className={`flex-1 py-4 border-2 rounded-2xl font-bold transition-all ${duration_type === 'short_term' ? 'bg-blue-50 text-toss-blue border-toss-blue' : 'bg-gray-50 text-gray-400 border-gray-100'}`}
+               >
+                 아니요,<br/>나중에 정산할게요
+               </button>
+               <button 
+                 onClick={() => setField({ duration_type: 'long_term' })}
+                 className={`flex-1 py-4 border-2 rounded-2xl font-bold transition-all ${duration_type === 'long_term' ? 'bg-blue-50 text-toss-blue border-toss-blue' : 'bg-gray-50 text-gray-400 border-gray-100'}`}
+               >
+                 네,<br/>회비를 걷을게요
+               </button>
+            </div>
+            
+            {duration_type === 'long_term' && (
+              <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <label className="text-sm font-bold text-toss-text-secondary mb-3 block">초기 회비 금액</label>
+                <div className="flex items-center mb-4 border border-gray-200 rounded-2xl px-4 py-2 bg-gray-50 focus-within:border-toss-blue focus-within:bg-white transition-colors">
+                  <span className="text-2xl font-bold text-gray-400 mr-2">₩</span>
+                  <input 
+                    type="text" inputMode="numeric"
+                    className="bg-transparent text-2xl font-extrabold text-toss-text w-full outline-none py-3" 
+                    value={upfrontDues ? upfrontDues.toLocaleString() : ''} 
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/,/g, '');
+                      if (val === '') setField({ upfrontDues: 0 });
+                      else if (!isNaN(Number(val))) setField({ upfrontDues: Number(val) });
+                    }} 
+                    placeholder="0"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2 mb-6">
+                  {[10000, 30000, 50000].map(amt => (
+                    <button
+                      key={amt}
+                      onClick={() => setField({ upfrontDues: upfrontDues + amt })}
+                      className="py-3 bg-blue-50 text-toss-blue rounded-xl font-bold text-sm active:bg-blue-100"
+                    >+{amt/10000}만</button>
+                  ))}
+                  <button
+                     onClick={() => setField({ upfrontDues: 0 })}
+                     className="col-span-3 mt-1 text-center text-gray-400 font-semibold py-2 text-sm"
+                  >초기화 (0원)</button>
+                </div>
+
+                <div className="bg-gray-50 border border-gray-100 rounded-2xl p-5 mb-4">
+                   <h3 className="font-bold text-toss-text mb-4 text-sm">정기 납부 일정을 설정할까요?</h3>
+                   
+                   <div className="flex space-x-2 mb-4">
+                     <button 
+                       onClick={() => setField({ scheduleType: 'none', scheduleDay: null, recurringAmount: 0 })}
+                       className={`flex-1 py-2 rounded-lg font-bold text-sm border-2 transition-all ${scheduleType === 'none' ? 'border-toss-blue bg-blue-50 text-toss-blue' : 'border-gray-200 bg-white text-gray-400'}`}
+                     >해당없음</button>
+                     <button 
+                       onClick={() => setField({ scheduleType: 'weekly', scheduleDay: 1 })}
+                       className={`flex-1 py-2 rounded-lg font-bold text-sm border-2 transition-all ${scheduleType === 'weekly' ? 'border-toss-blue bg-blue-50 text-toss-blue' : 'border-gray-200 bg-white text-gray-400'}`}
+                     >매주</button>
+                     <button 
+                       onClick={() => setField({ scheduleType: 'monthly', scheduleDay: 1 })}
+                       className={`flex-1 py-2 rounded-lg font-bold text-sm border-2 transition-all ${scheduleType === 'monthly' ? 'border-toss-blue bg-blue-50 text-toss-blue' : 'border-gray-200 bg-white text-gray-400'}`}
+                     >매월</button>
+                   </div>
+                   
+                   {scheduleType === 'weekly' && (
+                     <div className="flex flex-col mb-4">
+                       <label className="text-xs font-bold text-gray-400 mb-2">무슨 요일에 걷을까요?</label>
+                       <select 
+                         value={scheduleDay || 1} 
+                         onChange={(e) => setField({ scheduleDay: Number(e.target.value) })}
+                         className="toss-input !py-3 font-semibold text-sm appearance-none cursor-pointer"
+                       >
+                         <option value={1}>월요일</option>
+                         <option value={2}>화요일</option>
+                         <option value={3}>수요일</option>
+                         <option value={4}>목요일</option>
+                         <option value={5}>금요일</option>
+                         <option value={6}>토요일</option>
+                         <option value={7}>일요일</option>
+                       </select>
+                     </div>
+                   )}
+                   
+                   {(scheduleType === 'monthly' || scheduleType === 'yearly') && (
+                     <div className="flex flex-col mb-4">
+                       <label className="text-xs font-bold text-gray-400 mb-2">며칠에 걷을까요?</label>
+                       <select 
+                         value={scheduleDay || 1} 
+                         onChange={(e) => setField({ scheduleDay: Number(e.target.value) })}
+                         className="toss-input !py-3 font-semibold text-sm appearance-none cursor-pointer"
+                       >
+                         {Array.from({length: 31}, (_, i) => i + 1).map(day => (
+                           <option key={day} value={day}>{day}일</option>
+                         ))}
+                       </select>
+                     </div>
+                   )}
+                   
+                   {scheduleType !== 'none' && (
+                      <div className="flex flex-col">
+                        <label className="text-xs font-bold text-gray-400 mb-2">정기 회비 액수 (원)</label>
+                        <input 
+                          type="number" 
+                          value={recurringAmount || ''} 
+                          onChange={(e) => setField({ recurringAmount: Number(e.target.value) })}
+                          placeholder="매번 얼마씩 걷나요?"
+                          className="toss-input !py-3 font-semibold text-sm"
+                        />
+                      </div>
+                   )}
                  </div>
-                 
-                 {scheduleType === 'weekly' && (
-                   <div className="flex flex-col">
-                     <label className="text-xs font-bold text-gray-400 mb-2">무슨 요일에 걷을까요?</label>
-                     <select 
-                       value={scheduleDay || 1} 
-                       onChange={(e) => setField({ scheduleDay: Number(e.target.value) })}
-                       className="toss-input !py-3 font-semibold text-sm appearance-none cursor-pointer"
-                     >
-                       <option value={1}>월요일</option>
-                       <option value={2}>화요일</option>
-                       <option value={3}>수요일</option>
-                       <option value={4}>목요일</option>
-                       <option value={5}>금요일</option>
-                       <option value={6}>토요일</option>
-                       <option value={7}>일요일</option>
-                     </select>
-                   </div>
-                 )}
-                 
-                 {(scheduleType === 'monthly' || scheduleType === 'yearly') && (
-                   <div className="flex flex-col">
-                     <label className="text-xs font-bold text-gray-400 mb-2">며칠에 걷을까요?</label>
-                     <select 
-                       value={scheduleDay || 1} 
-                       onChange={(e) => setField({ scheduleDay: Number(e.target.value) })}
-                       className="toss-input !py-3 font-semibold text-sm appearance-none cursor-pointer"
-                     >
-                       {Array.from({length: 31}, (_, i) => i + 1).map(day => (
-                         <option key={day} value={day}>{day}일</option>
-                       ))}
-                     </select>
-                   </div>
-                 )}
-               </div>
+              </div>
             )}
           </div>
         )}

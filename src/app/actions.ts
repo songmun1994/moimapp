@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { encryptData, decryptData } from "@/lib/crypto";
 
 const prisma = new PrismaClient();
 
@@ -46,6 +47,7 @@ export async function createMeetingAction(formData: FormData) {
   const coverImageFile = formData.get("coverImage") as File | null;
   const scheduleType = formData.get("scheduleType") as "weekly" | "monthly" | "yearly" | null;
   const scheduleDay = formData.get("scheduleDay") ? parseInt(formData.get("scheduleDay") as string) : null;
+  const recurringAmount = formData.get("recurringAmount") ? Number(formData.get("recurringAmount")) : 0;
   
   const coverImageUrl = await saveFile(coverImageFile);
   const publicToken = crypto.randomUUID();
@@ -55,6 +57,7 @@ export async function createMeetingAction(formData: FormData) {
       recurring_type: scheduleType,
       recurring_day_of_week: scheduleType === 'weekly' ? scheduleDay : null,
       recurring_day_of_month: (scheduleType === 'monthly' || scheduleType === 'yearly') ? scheduleDay : null,
+      recurring_amount: recurringAmount
     }
   } : undefined;
 
@@ -68,7 +71,7 @@ export async function createMeetingAction(formData: FormData) {
       upfront_dues: upfrontDues,
       member_count: membersData.length,
       account_bank: bank,
-      account_number: account,
+      account_number: account ? encryptData(account) : null,
       account_holder: holder,
       cover_image_url: coverImageUrl,
       members: {
@@ -90,6 +93,11 @@ export async function getMeetingAction(token: string) {
     where: { public_token: token },
     include: { members: { orderBy: { sort_order: 'asc' } } }
   });
+  
+  if (meeting && meeting.account_number) {
+    meeting.account_number = decryptData(meeting.account_number);
+  }
+  
   return serializeBigInt(meeting);
 }
 
@@ -130,6 +138,10 @@ export async function addExpenseAction(token: string, formData: FormData) {
   if (expenseType === "income") {
     amount = -Math.abs(amount);
   }
+  
+  const spentDateStr = formData.get("spent_date") as string | null;
+  const spentDate = spentDateStr ? new Date(spentDateStr) : new Date();
+
   const receiptFile = formData.get("receiptImage") as File | null;
   const selectedMemberNames = JSON.parse(formData.get("selectedMembers") as string) as string[];
   
@@ -146,7 +158,8 @@ export async function addExpenseAction(token: string, formData: FormData) {
       merchant_name: merchantName,
       merchant_address: merchantAddress,
       amount: amount,
-      receipt_url: receiptUrl,
+      ...(spentDateStr && { spent_date: new Date(spentDateStr) }),
+      ...(receiptUrl && { receipt_url: receiptUrl }),
       expense_members: {
         create: validMemberIds.map(memberId => ({
           member_id: memberId
@@ -181,11 +194,14 @@ export async function editExpenseAction(token: string, expenseIdStr: string, for
     .filter(m => selectedMemberNames.includes(m.name))
     .map(m => m.id);
 
+  const spentDateStr = formData.get("spent_date") as string | null;
+
   let updateData: any = {
     place_name: placeName,
     merchant_name: merchantName,
     merchant_address: merchantAddress,
     amount: amount,
+    ...(spentDateStr && { spent_date: new Date(spentDateStr) })
   };
 
   if (receiptFile && receiptFile.size > 0) {
@@ -272,3 +288,180 @@ export async function approveMeetingDuesAction(token: string, checkedCount?: num
   }
 }
 
+// 8. 모임 기본 정보 수정
+export async function updateMeetingAction(token: string, formData: FormData) {
+  const meeting = await prisma.meetings.findUnique({
+    where: { public_token: token }
+  });
+  if (!meeting) throw new Error("Meeting not found");
+
+  const name = formData.get("name") as string | null;
+  const description = formData.get("description") as string | null;
+  const accountBank = formData.get("bankInfo.bank") as string | null;
+  const accountHolder = formData.get("bankInfo.holder") as string | null;
+  const accountRaw = formData.get("bankInfo.account") as string | null;
+  const upfrontDues = formData.get("upfrontDues");
+  const scheduleType = formData.get("scheduleType") as string | null;
+  const scheduleDay = formData.get("scheduleDay");
+  const recurringAmount = formData.get("recurringAmount");
+
+  const dataToUpdate: any = {};
+  if (name) dataToUpdate.meeting_name = name;
+  if (description !== null) dataToUpdate.description = description;
+  if (upfrontDues !== null) dataToUpdate.upfront_dues = Number(upfrontDues);
+
+  if (accountBank !== null) dataToUpdate.account_bank = accountBank;
+  if (accountHolder !== null) dataToUpdate.account_holder = accountHolder;
+  // If the account number is empty string, we clear it. If filled, we encrypt it.
+  if (accountRaw !== null) {
+    dataToUpdate.account_number = accountRaw ? encryptData(accountRaw) : null;
+  }
+
+  await prisma.meetings.update({
+    where: { public_token: token },
+    data: dataToUpdate
+  });
+
+  if (scheduleType && scheduleType !== 'none') {
+    await prisma.meeting_schedules.upsert({
+      where: { meeting_id: meeting.id },
+      create: {
+        meeting_id: meeting.id,
+        recurring_type: scheduleType as any,
+        recurring_day_of_week: scheduleType === 'weekly' ? Number(scheduleDay) : null,
+        recurring_day_of_month: (scheduleType === 'monthly' || scheduleType === 'yearly') ? Number(scheduleDay) : null,
+        recurring_amount: Number(recurringAmount)
+      },
+      update: {
+        recurring_type: scheduleType as any,
+        recurring_day_of_week: scheduleType === 'weekly' ? Number(scheduleDay) : null,
+        recurring_day_of_month: (scheduleType === 'monthly' || scheduleType === 'yearly') ? Number(scheduleDay) : null,
+        recurring_amount: Number(recurringAmount)
+      }
+    });
+  } else if (scheduleType === 'none') {
+    // If they switched to 'none', we should delete the existing schedule if it exists
+    try {
+       await prisma.meeting_schedules.delete({
+         where: { meeting_id: meeting.id }
+       });
+    } catch(e) {}
+  }
+
+  return serializeBigInt({ success: true });
+}
+
+// 9. 멤버 수동 추가
+export async function addMemberAction(token: string, newName: string) {
+  const meeting = await prisma.meetings.findUnique({
+    where: { public_token: token },
+    include: { members: true }
+  });
+  if (!meeting) throw new Error("Meeting not found");
+
+  const nextSortOrder = meeting.members.length;
+  
+  await prisma.members.create({
+    data: {
+      meeting_id: meeting.id,
+      name: newName,
+      sort_order: nextSortOrder
+    }
+  });
+
+  await prisma.meetings.update({
+    where: { id: meeting.id },
+    data: { member_count: meeting.member_count + 1 }
+  });
+
+  return serializeBigInt({ success: true });
+}
+
+// 10. 멤버 수동 삭제 (지출 내역 없을 시)
+export async function removeMemberAction(token: string, memberIdStr: string) {
+  const meeting = await prisma.meetings.findUnique({
+    where: { public_token: token }
+  });
+  if (!meeting) throw new Error("Meeting not found");
+
+  const memberId = BigInt(memberIdStr);
+
+  const usageCount = await prisma.expense_members.count({
+    where: { member_id: memberId }
+  });
+
+  if (usageCount > 0) {
+    return serializeBigInt({ success: false, error: "이 멤버가 참여한 지출 내역이 존재하여 삭제할 수 없습니다." });
+  }
+
+  await prisma.members.delete({
+    where: { id: memberId }
+  });
+
+  await prisma.meetings.update({
+    where: { id: meeting.id },
+    data: { member_count: { decrement: 1 } }
+  });
+
+  return serializeBigInt({ success: true });
+}
+
+// 11. 공금(회비) 납부 내역 조회
+export async function getFundPaymentsAction(token: string) {
+  const meeting = await prisma.meetings.findUnique({
+    where: { public_token: token }
+  });
+  if (!meeting) return [];
+
+  const payments = await prisma.funds_payments.findMany({
+    where: { meeting_id: meeting.id },
+    include: {
+      members: { select: { name: true, sort_order: true } }
+    },
+    orderBy: { payment_date: 'desc' }
+  });
+
+  return serializeBigInt(payments);
+}
+
+// 12. 공금 납부 기록 추가
+export async function addFundPaymentAction(token: string, memberIdStr: string, amount: number, memo?: string, paymentDateStr?: string) {
+  const meeting = await prisma.meetings.findUnique({
+    where: { public_token: token }
+  });
+  if (!meeting) throw new Error("Meeting not found");
+
+  const paymentDate = paymentDateStr ? new Date(paymentDateStr) : new Date();
+
+  await prisma.funds_payments.create({
+    data: {
+      meeting_id: meeting.id,
+      member_id: BigInt(memberIdStr),
+      amount: amount,
+      payment_date: paymentDate,
+      memo: memo || ""
+    }
+  });
+
+  return serializeBigInt({ success: true });
+}
+
+// 13. 공금 납부 기록 삭제
+export async function deleteFundPaymentAction(token: string, paymentIdStr: string) {
+  const meeting = await prisma.meetings.findUnique({
+    where: { public_token: token }
+  });
+  if (!meeting) throw new Error("Meeting not found");
+
+  const payment = await prisma.funds_payments.findFirst({
+    where: { id: BigInt(paymentIdStr), meeting_id: meeting.id }
+  });
+
+  if (!payment) throw new Error("Payment record not found for this meeting");
+
+  await prisma.funds_payments.delete({
+    where: { id: BigInt(paymentIdStr) }
+  });
+
+  return serializeBigInt({ success: true });
+}

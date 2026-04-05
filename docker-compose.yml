@@ -13,6 +13,7 @@ services:
       - HOSTNAME=0.0.0.0
       - PORT=3000
       - NODE_ENV=production
+      - TZ=Asia/Seoul
     volumes:
       - /home/song/moim-app/uploads:/app/public/moim/uploads
     networks:

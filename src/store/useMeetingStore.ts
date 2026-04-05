@@ -16,6 +16,7 @@ interface MeetingState {
   };
   scheduleType: 'none' | 'weekly' | 'monthly' | 'yearly';
   scheduleDay: number | null;
+  recurringAmount: number;
   setField: (field: Partial<MeetingState>) => void;
   reset: () => void;
 }
@@ -30,6 +31,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
   bankInfo: { bank: '', account: '', holder: '' },
   scheduleType: 'none',
   scheduleDay: null,
+  recurringAmount: 0,
   setField: (fields) => set((state) => ({ ...state, ...fields })),
   reset: () => set({
     name: '',
@@ -43,5 +45,6 @@ export const useMeetingStore = create<MeetingState>((set) => ({
     bankInfo: { bank: '', account: '', holder: '' },
     scheduleType: 'none',
     scheduleDay: null,
+    recurringAmount: 0,
   })
 }));

@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Plus, ReceiptText, Users, Calculator, Camera, Trash2, Home, Search, MapPin } from "lucide-react";
-import { getExpensesAction, addExpenseAction, editExpenseAction, getMeetingAction, deleteMeetingAction } from "@/app/actions";
+import { ChevronLeft, Plus, ReceiptText, Users, Calculator, Camera, Trash2, Home, Search, MapPin, Settings, Wallet } from "lucide-react";
+import { getExpensesAction, addExpenseAction, editExpenseAction, getMeetingAction, deleteMeetingAction, getFundPaymentsAction } from "@/app/actions";
 
 export default function ExpensesPage(props: { params: Promise<{ meetingToken: string }> }) {
   const params = use(props.params);
@@ -10,16 +10,20 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
   
   const [meeting, setMeeting] = useState<any>(null);
   const [expenses, setExpenses] = useState<any[]>([]);
+  const [fundsPayments, setFundsPayments] = useState<any[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isCreator, setIsCreator] = useState(false);
   
-  const [newExpense, setNewExpense] = useState({ place: "", merchant: "", merchant_address: "", amount: "", memo: "", type: "expense" });
+  const [newExpense, setNewExpense] = useState({ place: "", merchant: "", merchant_address: "", amount: "", memo: "", type: "expense", spent_date: new Date().toISOString().substring(0, 10), manual_merchant: false });
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const searchTimeout = useRef<NodeJS.Timeout | null>(null);
+  
+  const [filterMonth, setFilterMonth] = useState<string>("all");
 
   const searchPlaces = (text: string) => {
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
@@ -39,9 +43,11 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
 
   const fetchBaseData = async () => {
     try {
+      const recent = JSON.parse(localStorage.getItem("recent_meetings") || "[]");
+      setIsCreator(recent.some((m: any) => m.id === params.meetingToken));
+
       const mtg = await getMeetingAction(params.meetingToken);
       if (!mtg) {
-        const recent = JSON.parse(localStorage.getItem("recent_meetings") || "[]");
         const filtered = recent.filter((m: any) => m.id !== params.meetingToken);
         localStorage.setItem("recent_meetings", JSON.stringify(filtered));
         
@@ -52,8 +58,12 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
       setMeeting(mtg);
       setSelectedMembers(mtg.members.map((m: any) => m.name));
       
-      const exp = await getExpensesAction(params.meetingToken);
+      const [exp, funds] = await Promise.all([
+        getExpensesAction(params.meetingToken),
+        getFundPaymentsAction(params.meetingToken)
+      ]);
       setExpenses(exp);
+      setFundsPayments(funds);
     } catch (err) {
       console.error(err);
     } finally {
@@ -65,24 +75,76 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
     fetchBaseData();
   }, [params.meetingToken]);
 
-  const handleImagePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const compressImage = (file: File): Promise<File> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const MAX_SIZE = 1200;
+          let { width, height } = img;
+          if (width > height && width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          } else if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                resolve(new File([blob], file.name.replace(/\.[^/.]+$/, ".webp"), { type: "image/webp" }));
+              } else resolve(file);
+            },
+            "image/webp",
+            0.8
+          );
+        };
+        img.onerror = () => resolve(file);
+      };
+      reader.onerror = () => resolve(file);
+    });
+  };
+
+  const handleImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      setReceiptFile(file);
       setReceiptPreview(URL.createObjectURL(file));
+      
+      try {
+        const compressed = await compressImage(file);
+        setReceiptFile(compressed);
+      } catch (err) {
+        setReceiptFile(file);
+      }
     }
   };
 
   const openEditModal = (exp: any) => {
     setEditingExpenseId(exp.id.toString());
     const isIncome = Number(exp.amount) < 0;
+    let spentDate = new Date().toISOString().substring(0, 10);
+    if (exp.spent_date) {
+      spentDate = new Date(exp.spent_date).toISOString().substring(0, 10);
+    } else if (exp.created_at) {
+      spentDate = new Date(exp.created_at).toISOString().substring(0, 10);
+    }
     setNewExpense({
       place: exp.place_name,
       merchant: exp.merchant_name || "",
       merchant_address: exp.merchant_address || "",
-      amount: Math.abs(Number(exp.amount)).toString(),
+      amount: Math.abs(Number(exp.amount)).toLocaleString(),
       memo: exp.memo || "",
-      type: isIncome ? "income" : "expense"
+      type: isIncome ? "income" : "expense",
+      spent_date: spentDate,
+      manual_merchant: !exp.merchant_address && !!exp.merchant_name
     });
     setSelectedMembers(exp.expense_members.map((em: any) => em.members.name));
     setReceiptPreview(exp.receipt_url || null);
@@ -95,9 +157,11 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
       setLoading(true);
       const formData = new FormData();
       formData.append("place_name", newExpense.place);
-      formData.append("amount", newExpense.amount);
+      const pureAmount = newExpense.amount.replace(/,/g, '');
+      formData.append("amount", pureAmount);
       if (newExpense.merchant) formData.append("merchant_name", newExpense.merchant);
-      if (newExpense.merchant_address) formData.append("merchant_address", newExpense.merchant_address);
+      if (newExpense.merchant_address && !newExpense.manual_merchant) formData.append("merchant_address", newExpense.merchant_address);
+      if (newExpense.spent_date) formData.append("spent_date", newExpense.spent_date);
       formData.append("selectedMembers", JSON.stringify(selectedMembers));
       formData.append("expenseType", newExpense.type);
       if (receiptFile) formData.append("receiptImage", receiptFile);
@@ -110,7 +174,7 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
       
       setShowAddForm(false);
       setEditingExpenseId(null);
-      setNewExpense({ place: "", merchant: "", merchant_address: "", amount: "", memo: "", type: "expense" });
+      setNewExpense({ place: "", merchant: "", merchant_address: "", amount: "", memo: "", type: "expense", spent_date: new Date().toISOString().substring(0, 10), manual_merchant: false });
       setSearchResults([]);
       setReceiptFile(null);
       setReceiptPreview(null);
@@ -148,8 +212,25 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
     }
   };
 
-  const totalAmount = expenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
-  const totalPot = Number(meeting?.upfront_dues || 0) * (meeting?.members?.length || 1);
+  const totalPot = fundsPayments.reduce((acc, curr) => acc + Number(curr.amount), 0);
+  
+  // Create month options
+  const monthSet = new Set<string>();
+  expenses.forEach(e => {
+    const d = e.spent_date ? new Date(e.spent_date) : new Date(e.created_at);
+    monthSet.add(`${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}`);
+  });
+  const monthOptions = Array.from(monthSet).sort().reverse();
+  
+  // Filter expenses
+  const filteredExpenses = filterMonth === 'all' 
+    ? expenses 
+    : expenses.filter(e => {
+        const d = e.spent_date ? new Date(e.spent_date) : new Date(e.created_at);
+        return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}` === filterMonth;
+      });
+
+  const totalAmount = filteredExpenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
   const remainingPot = totalPot - totalAmount;
 
   return (
@@ -159,9 +240,16 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
           <ChevronLeft className="w-6 h-6 text-toss-text" />
         </button>
         <div className="font-bold text-lg text-toss-text truncate flex-1 text-center px-2">{meeting?.meeting_name || "지출 내역"}</div>
-        <button onClick={() => router.push("/home")} className="p-2">
-          <Home className="w-6 h-6 text-toss-text" />
-        </button>
+        <div className="flex items-center">
+          {isCreator && (
+            <button onClick={() => router.push(`/${params.meetingToken}/settings`)} className="p-2 text-toss-text-secondary hover:text-toss-blue transition-colors">
+              <Settings className="w-6 h-6" />
+            </button>
+          )}
+          <button onClick={() => router.push("/home")} className="p-2 text-toss-text-secondary hover:text-toss-blue transition-colors">
+            <Home className="w-6 h-6" />
+          </button>
+        </div>
       </header>
 
       <div className="p-6 pb-24">
@@ -176,13 +264,21 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
         </div>
 
         <div className="bg-toss-blue text-white p-6 rounded-[24px] shadow-lg shadow-blue-500/20 mb-8 relative overflow-hidden">
-          {totalPot > 0 ? (
+          {totalPot > 0 || meeting?.duration_type === 'long_term' ? (
             <>
-              <p className="text-blue-100 font-medium mb-1 relative z-10">남은 예산 (모인 회비 - 지출)</p>
-              <div className="text-4xl font-extrabold mb-2 relative z-10">{remainingPot > 0 ? `+${remainingPot.toLocaleString()}` : remainingPot.toLocaleString()}원</div>
-              <div className="flex bg-white/20 p-3 rounded-xl mb-5 text-sm font-semibold justify-between backdrop-blur-sm relative z-10">
-                <span>총 회비: {totalPot.toLocaleString()}원</span>
-                <span>지출: {totalAmount.toLocaleString()}원</span>
+              <div className="flex items-center justify-between mb-1 relative z-10">
+                <p className="text-blue-100 font-medium">남은 공금 (모인 회비 - 지출)</p>
+                <button 
+                  onClick={() => router.push(`/${params.meetingToken}/funds`)} 
+                  className="bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center shadow-sm backdrop-blur-sm"
+                >
+                  <Wallet className="w-4 h-4 mr-1" /> 회비(장부) 관리
+                </button>
+              </div>
+              <div className="text-4xl font-extrabold mb-4 relative z-10">{remainingPot > 0 ? `+${remainingPot.toLocaleString()}` : remainingPot.toLocaleString()}원</div>
+              <div className="flex bg-white/20 p-3 rounded-xl mb-5 text-sm font-semibold justify-between backdrop-blur-sm relative z-10 gap-2">
+                <span className="flex-1 text-center bg-black/10 p-2 rounded-lg truncate">모인 돈: {totalPot.toLocaleString()}</span>
+                <span className="flex-1 text-center bg-black/10 p-2 rounded-lg truncate">쓴 돈: {totalAmount.toLocaleString()}</span>
               </div>
             </>
           ) : (
@@ -200,15 +296,28 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
           </button>
         </div>
 
-        <h3 className="font-bold text-toss-text-secondary mb-4 px-1">상세 내역</h3>
-        {expenses.length === 0 ? (
+        <div className="flex justify-between items-end mb-4 px-1">
+          <h3 className="font-bold text-toss-text-secondary">상세 내역</h3>
+          {monthOptions.length > 0 && (
+            <select 
+              value={filterMonth} 
+              onChange={e => setFilterMonth(e.target.value)}
+              className="bg-gray-100 text-toss-text-secondary text-sm font-bold py-1.5 px-3 rounded-lg border-0 outline-none"
+            >
+              <option value="all">전체 기간</option>
+              {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
+        </div>
+
+        {filteredExpenses.length === 0 ? (
           <div className="text-center py-16 bg-white rounded-2xl border-2 border-dashed border-gray-200 text-gray-400">
             <ReceiptText className="w-12 h-12 mx-auto mb-3 opacity-40" />
             <p className="font-medium">등록된 항목이 없습니다.</p>
           </div>
         ) : (
           <div className="space-y-4">
-            {expenses.map((exp) => (
+            {filteredExpenses.map((exp: any) => (
               <div 
                 key={exp.id.toString()} 
                 onClick={() => openEditModal(exp)}
@@ -236,6 +345,14 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
                     </div>
                   )}
                   <div className="flex items-center text-sm text-toss-text-secondary bg-gray-50 p-2.5 rounded-xl mt-2 border border-gray-100">
+                    <div className="flex flex-col items-center mr-4 w-12 flex-shrink-0 pt-0.5">
+                      <div className="text-toss-text font-bold text-base mb-0.5">
+                        {exp.spent_date ? new Date(exp.spent_date).getDate() : new Date(exp.created_at).getDate()}일
+                      </div>
+                      <div className="text-xs text-gray-400 font-medium">
+                        {exp.spent_date ? new Date(exp.spent_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : new Date(exp.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      </div>
+                    </div>
                     <Users className="w-4 h-4 mr-2 flex-shrink-0" />
                     <span className="truncate">
                       {exp.expense_members.map((em: any) => em.members.name).join(", ")}
@@ -259,7 +376,7 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
         <button 
           onClick={() => {
             setEditingExpenseId(null);
-            setNewExpense({ place: "", merchant: "", merchant_address: "", amount: "", memo: "", type: "expense" });
+            setNewExpense({ place: "", merchant: "", merchant_address: "", amount: "", memo: "", type: "expense", spent_date: new Date().toISOString().substring(0, 10), manual_merchant: false });
             setSelectedMembers(meeting?.members.map((m: any) => m.name) || []);
             setReceiptPreview(null);
             setReceiptFile(null);
@@ -288,23 +405,46 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
             </div>
             
             <div className="mb-4 relative">
-              <label className="block text-sm font-bold text-gray-700 mb-2">매장명 검색 (선택)</label>
-              <div className="relative">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-bold text-gray-700">매장명 검색 (선택)</label>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setNewExpense({...newExpense, manual_merchant: !newExpense.manual_merchant, merchant_address: ""});
+                    setSearchResults([]);
+                  }}
+                  className="text-xs font-bold text-toss-blue bg-blue-50 px-2.5 py-1 rounded-md"
+                >
+                  {newExpense.manual_merchant ? "지도 검색 사용" : "직접 입력하기"}
+                </button>
+              </div>
+              
+              {newExpense.manual_merchant ? (
                 <input 
                   type="text" 
                   value={newExpense.merchant} 
-                  onChange={e => {
-                     setNewExpense({...newExpense, merchant: e.target.value});
-                     searchPlaces(e.target.value);
-                  }}
+                  onChange={e => setNewExpense({...newExpense, merchant: e.target.value})}
                   className="toss-input" 
-                  style={{ paddingLeft: '44px' }}
-                  placeholder="영수증 매장명 검색 (자동완성)" 
+                  placeholder="매장/장소 이름을 자유롭게 입력하세요" 
                 />
-                <Search className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-              </div>
+              ) : (
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    value={newExpense.merchant} 
+                    onChange={e => {
+                       setNewExpense({...newExpense, merchant: e.target.value});
+                       searchPlaces(e.target.value);
+                    }}
+                    className="toss-input" 
+                    style={{ paddingLeft: '44px' }}
+                    placeholder="영수증 매장명 검색 (자동완성)" 
+                  />
+                  <Search className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                </div>
+              )}
               
-              {searchResults.length > 0 && (
+              {!newExpense.manual_merchant && searchResults.length > 0 && (
                 <div className="absolute z-50 w-full mt-2 bg-white rounded-2xl shadow-xl border border-gray-100 max-h-[220px] overflow-y-auto">
                   {searchResults.map((res: any, idx) => (
                     <div 
@@ -321,6 +461,16 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-bold text-gray-700 mb-2">결제 일자</label>
+              <input 
+                type="date"
+                value={newExpense.spent_date}
+                onChange={e => setNewExpense({...newExpense, spent_date: e.target.value})}
+                className="toss-input"
+              />
             </div>
             
             <div className="mb-4">
@@ -342,10 +492,14 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
             <div className="mb-6">
               <label className="block text-sm font-bold text-gray-700 mb-2">금액</label>
               <input 
-                type="number" 
+                type="text" inputMode="numeric"
                 value={newExpense.amount} 
-                onChange={e => setNewExpense({...newExpense, amount: e.target.value})}
-                className="toss-input" placeholder={newExpense.type === 'expense' ? "얼마를 썼나요?" : "얼마가 들어왔나요?"} 
+                onChange={e => {
+                  const val = e.target.value.replace(/,/g, '');
+                  if (val === '') setNewExpense({...newExpense, amount: ''});
+                  else if (!isNaN(Number(val))) setNewExpense({...newExpense, amount: Number(val).toLocaleString()});
+                }}
+                className="toss-input" placeholder={newExpense.type === 'expense' ? "예: 10,000" : "예: 10,000"} 
               />
             </div>
 
@@ -393,7 +547,7 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
                     if (confirm("작성 중인 내용이 모두 지워집니다. 정말 취소할까요?")) {
                       setShowAddForm(false);
                       setEditingExpenseId(null);
-                      setNewExpense({ place: "", merchant: "", merchant_address: "", amount: "", memo: "", type: "expense" });
+                      setNewExpense({ place: "", merchant: "", merchant_address: "", amount: "", memo: "", type: "expense", spent_date: new Date().toISOString().substring(0, 10), manual_merchant: false });
                       setSearchResults([]);
                       setReceiptFile(null);
                       setReceiptPreview(null);
@@ -403,12 +557,12 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
                     setShowAddForm(false);
                   }
                 }} 
-                className="flex-[1] py-4.5 bg-gray-100 text-gray-600 rounded-2xl font-bold active:bg-gray-200"
+                className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold active:bg-gray-200"
               >취소</button>
               <button 
                 disabled={loading || !newExpense.place || !newExpense.amount || selectedMembers.length === 0}
                 onClick={handleAdd}
-                className="w-full bg-toss-blue text-white py-4 font-bold text-lg rounded-2xl shadow-lg shadow-blue-500/30 disabled:bg-gray-300 disabled:shadow-none active:scale-[0.98] transition-all"
+                className="flex-[2.5] bg-toss-blue text-white py-4 font-bold text-lg rounded-2xl shadow-lg shadow-blue-500/30 disabled:bg-gray-300 disabled:shadow-none active:scale-[0.98] transition-all"
               >
                 {loading ? "처리 중..." : (editingExpenseId ? "수정 완료" : "등록 완료")}
               </button>
