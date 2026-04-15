@@ -33,6 +33,21 @@ async function saveFile(file: File | null): Promise<string | null> {
   return `/moim/uploads/${fileName}`; // 브라우저가 읽을 경로
 }
 
+function deleteFileSafely(fileUrl: string | null) {
+  if (!fileUrl) return;
+  try {
+    const fileName = fileUrl.split('/').pop();
+    if (fileName) {
+      const filePath = path.join(process.cwd(), "public/moim/uploads", fileName);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+  } catch (e) {
+    console.error("Failed to delete file:", e);
+  }
+}
+
 // 1. 모임 생성 액션
 export async function createMeetingAction(formData: FormData) {
   const name = formData.get("name") as string;
@@ -84,6 +99,19 @@ export async function createMeetingAction(formData: FormData) {
     }
   });
 
+  if (upfrontDues > 0) {
+    const members = await prisma.members.findMany({ where: { meeting_id: meeting.id } });
+    await prisma.funds_payments.createMany({
+      data: members.map((m: any) => ({
+        meeting_id: meeting.id,
+        member_id: m.id,
+        amount: upfrontDues,
+        payment_date: new Date(),
+        memo: "기본 초기 회비"
+      }))
+    });
+  }
+
   return serializeBigInt({ token: publicToken });
 }
 
@@ -91,7 +119,10 @@ export async function createMeetingAction(formData: FormData) {
 export async function getMeetingAction(token: string) {
   const meeting = await prisma.meetings.findUnique({
     where: { public_token: token },
-    include: { members: { orderBy: { sort_order: 'asc' } } }
+    include: { 
+      members: { orderBy: { sort_order: 'asc' } },
+      meeting_schedules: true
+    }
   });
   
   if (meeting && meeting.account_number) {
@@ -206,7 +237,11 @@ export async function editExpenseAction(token: string, expenseIdStr: string, for
 
   if (receiptFile && receiptFile.size > 0) {
     const receiptUrl = await saveFile(receiptFile);
-    if (receiptUrl) updateData.receipt_url = receiptUrl;
+    if (receiptUrl) {
+      const oldExpense = await prisma.expenses.findUnique({ where: { id: BigInt(expenseIdStr) }, select: { receipt_url: true } });
+      if (oldExpense?.receipt_url) deleteFileSafely(oldExpense.receipt_url);
+      updateData.receipt_url = receiptUrl;
+    }
   }
 
   await prisma.$transaction([
@@ -231,10 +266,45 @@ export async function editExpenseAction(token: string, expenseIdStr: string, for
 
 // 5. 모임 삭제
 export async function deleteMeetingAction(token: string) {
+  const meeting = await prisma.meetings.findUnique({
+    where: { public_token: token },
+    select: { cover_image_url: true, expenses: { select: { receipt_url: true } } }
+  });
+  
+  if (meeting) {
+    deleteFileSafely(meeting.cover_image_url);
+    meeting.expenses.forEach(e => deleteFileSafely(e.receipt_url));
+  }
+
   await prisma.meetings.delete({
     where: { public_token: token }
   });
   return { success: true };
+}
+
+export async function deleteExpenseAction(token: string, expenseId: string) {
+  const meeting = await prisma.meetings.findUnique({
+    where: { public_token: token },
+    select: { id: true }
+  });
+  if (!meeting) throw new Error("Not found");
+
+  const expense = await prisma.expenses.findUnique({
+    where: { id: BigInt(expenseId), meeting_id: meeting.id },
+    select: { receipt_url: true }
+  });
+
+  if (expense) {
+    deleteFileSafely(expense.receipt_url);
+  }
+
+  await prisma.expenses.delete({
+    where: {
+      id: BigInt(expenseId),
+      meeting_id: meeting.id
+    }
+  });
+  return serializeBigInt({ success: true });
 }
 
 // 6. 도래한 정기 회비 모임 조회
@@ -261,30 +331,43 @@ export async function getDueMeetingsAction(tokens: string[]) {
   return serializeBigInt(dueMeetings);
 }
 
-// 7. 정기 회비 승인 (기본 회비만큼 누적, 혹은 체크된 인원 수만큼 부분 수납 지원)
-export async function approveMeetingDuesAction(token: string, checkedCount?: number) {
+// 6.1. 홈 화면 최근 모임 리스트용 기본 정보 조회 (캐싱 동기화 목적)
+export async function getMeetingsBaseInfoAction(tokens: string[]) {
+  if (tokens.length === 0) return [];
+  const meetings = await prisma.meetings.findMany({
+    where: { public_token: { in: tokens } },
+    select: { public_token: true, meeting_name: true, cover_image_url: true }
+  });
+  return serializeBigInt(meetings);
+}
+
+// 7. 정기 회비 승인 (특정 멤버들 수납 처리)
+export async function approveMeetingDuesAction(token: string, checkedMemberIds: string[] = []) {
   const meeting = await prisma.meetings.findUnique({
     where: { public_token: token },
-    include: { members: true }
+    include: { members: true, meeting_schedules: true }
   });
   if (!meeting) throw new Error("Not found");
   
-  const count = checkedCount !== undefined ? checkedCount : meeting.members.length;
-  if (count <= 0) return { success: true };
+  if (checkedMemberIds.length === 0) return { success: true };
   
-  // 회비 정기 납부를 "수입(+)" 항목으로 타임라인에 삽입
-  const totalDue = Number(meeting.upfront_dues) * count;
-  if (totalDue > 0) {
-    await prisma.expenses.create({
-      data: {
-        meeting_id: meeting.id,
-        place_name: `정기 회비 납부 (${count}명 수납 완료)`,
-        amount: -totalDue,
-        expense_members: {
-          create: meeting.members.slice(0, count).map(m => ({ member_id: m.id }))
-        }
-      }
-    });
+  const amountToCharge = meeting.meeting_schedules?.recurring_amount 
+    ? Number(meeting.meeting_schedules.recurring_amount) 
+    : Number(meeting.upfront_dues || 0);
+
+  if (amountToCharge > 0) {
+    const validMembers = meeting.members.filter(m => checkedMemberIds.includes(m.id.toString()));
+    if (validMembers.length > 0) {
+      await prisma.funds_payments.createMany({
+        data: validMembers.map(m => ({
+          meeting_id: meeting.id,
+          member_id: m.id,
+          amount: amountToCharge,
+          payment_date: new Date(),
+          memo: "정기 회비 납부"
+        }))
+      });
+    }
   }
 }
 

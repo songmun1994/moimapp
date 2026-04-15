@@ -129,20 +129,23 @@ export default function MeetingSettings() {
 
   return (
     <div className="flex flex-col flex-1 bg-gray-50 relative min-h-screen pb-20">
-      <header className="bg-white p-4 flex items-center shadow-sm sticky top-0 z-20">
-        <button onClick={() => router.push(`/${meetingToken}/expenses`)} className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors">
+      <header className="px-4 h-14 flex items-center justify-between bg-white shadow-sm sticky top-0 z-20">
+        <button onClick={() => router.push(`/${meetingToken}/expenses`)} className="p-2 -ml-2 relative z-10 rounded-full hover:bg-gray-100 transition-colors">
           <ChevronLeft className="w-6 h-6 text-toss-text" />
         </button>
-        <div className="flex-1 text-center font-bold text-toss-text text-lg pr-4">
-          모임 설정
-        </div>
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="font-bold text-toss-text text-lg text-center w-full px-20 truncate">
+            모임 설정
+          </div>
+         </div>
+         <div className="w-10 relative z-10"></div>
       </header>
 
       <div className="p-5 space-y-6">
         
         {/* 모임 기본 정보 섹션 */}
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <h2 className="flex items-center text-lg font-bold text-toss-text mb-4">
+          <h2 className="flex items-center justify-center text-lg font-bold text-toss-text mb-4 w-full">
             <span className="bg-blue-50 text-toss-blue p-1.5 rounded-lg mr-2">⚙️</span>
             기본 정보 수정
           </h2>
@@ -163,7 +166,7 @@ export default function MeetingSettings() {
             className="toss-input !py-3 font-semibold mb-4 bg-gray-50 border-gray-200"
           />
           
-          <h3 className="flex items-center text-sm font-bold text-gray-600 mb-3 mt-6">
+          <h3 className="flex items-center justify-center text-sm font-bold text-gray-600 mb-3 mt-6 w-full">
             <CreditCard className="w-4 h-4 mr-1.5" /> 정산 계좌 정보
           </h3>
           <div className="grid grid-cols-2 gap-2 mb-2">
@@ -179,7 +182,7 @@ export default function MeetingSettings() {
           <label className="text-xs font-bold text-gray-400 mb-1 block">계좌 번호</label>
           <input type="text" value={account} onChange={e => setAccount(e.target.value)} className="toss-input !py-3 font-mono font-medium mb-4 bg-gray-50 border-gray-200" placeholder="1000-1111-2222" />
           
-          <h3 className="flex items-center text-sm font-bold text-gray-600 mb-3 mt-8">
+          <h3 className="flex items-center justify-center text-sm font-bold text-gray-600 mb-3 mt-8 w-full">
             <span className="mr-1">💰</span> 회비 납부 설정
           </h3>
           
@@ -232,7 +235,7 @@ export default function MeetingSettings() {
 
         {/* 멤버 관리 섹션 */}
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100">
-          <h2 className="flex items-center text-lg font-bold text-toss-text mb-4">
+          <h2 className="flex items-center justify-center text-lg font-bold text-toss-text mb-4 w-full">
             <span className="bg-green-50 text-green-600 p-1.5 rounded-lg mr-2"><Users className="w-5 h-5"/></span>
             참여 인원 관리 ({meeting?.members?.length || 0}명)
           </h2>

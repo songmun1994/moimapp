@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Plus, ReceiptText, Users, Calculator, Camera, Trash2, Home, Search, MapPin, Settings, Wallet } from "lucide-react";
-import { getExpensesAction, addExpenseAction, editExpenseAction, getMeetingAction, deleteMeetingAction, getFundPaymentsAction } from "@/app/actions";
+import { ChevronLeft, ChevronRight, Plus, ReceiptText, Users, Calculator, Camera, Trash2, Home, Search, MapPin, Settings, Wallet, X } from "lucide-react";
+import { getExpensesAction, addExpenseAction, editExpenseAction, deleteExpenseAction, getMeetingAction, deleteMeetingAction, getFundPaymentsAction } from "@/app/actions";
 
 export default function ExpensesPage(props: { params: Promise<{ meetingToken: string }> }) {
   const params = use(props.params);
@@ -11,8 +11,9 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
   const [meeting, setMeeting] = useState<any>(null);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [fundsPayments, setFundsPayments] = useState<any[]>([]);
-  const [showAddForm, setShowAddForm] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isCreator, setIsCreator] = useState(false);
   
@@ -23,7 +24,27 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const searchTimeout = useRef<NodeJS.Timeout | null>(null);
   
-  const [filterMonth, setFilterMonth] = useState<string>("all");
+  const [filterStartDate, setFilterStartDate] = useState<string>("");
+  const [filterEndDate, setFilterEndDate] = useState<string>("");
+  const [showFilterModal, setShowFilterModal] = useState<boolean>(false);
+
+  const getYYYYMMDD = (dStr: string | Date | null) => {
+    if (!dStr) return "";
+    const d = new Date(dStr);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const date = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${date}`;
+  };
+
+  useEffect(() => {
+    // 기본 디폴트 일자: 이번 달 1일 ~ 말일
+    const d = new Date();
+    const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    setFilterStartDate(getYYYYMMDD(firstDay));
+    setFilterEndDate(getYYYYMMDD(lastDay));
+  }, []);
 
   const searchPlaces = (text: string) => {
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
@@ -188,6 +209,30 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
     }
   };
 
+  const handleDeleteExpense = async () => {
+    if (!editingExpenseId) return;
+    if (confirm("이 지출 내역을 정말 삭제할까요?")) {
+      try {
+        setLoading(true);
+        await deleteExpenseAction(params.meetingToken, editingExpenseId);
+        
+        setShowAddForm(false);
+        setEditingExpenseId(null);
+        setNewExpense({ place: "", merchant: "", merchant_address: "", amount: "", memo: "", type: "expense", spent_date: new Date().toISOString().substring(0, 10), manual_merchant: false });
+        setSearchResults([]);
+        setReceiptFile(null);
+        setReceiptPreview(null);
+        
+        await fetchBaseData();
+      } catch (err) {
+        console.error(err);
+        alert("지출 삭제 중 오류가 발생했습니다.");
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
   if (loading && !meeting) {
     return <div className="flex h-screen items-center justify-center font-bold text-gray-400">Loading...</div>;
   }
@@ -213,34 +258,75 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
   };
 
   const totalPot = fundsPayments.reduce((acc, curr) => acc + Number(curr.amount), 0);
-  
-  // Create month options
-  const monthSet = new Set<string>();
-  expenses.forEach(e => {
-    const d = e.spent_date ? new Date(e.spent_date) : new Date(e.created_at);
-    monthSet.add(`${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}`);
-  });
-  const monthOptions = Array.from(monthSet).sort().reverse();
-  
-  // Filter expenses
-  const filteredExpenses = filterMonth === 'all' 
-    ? expenses 
-    : expenses.filter(e => {
-        const d = e.spent_date ? new Date(e.spent_date) : new Date(e.created_at);
-        return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}` === filterMonth;
-      });
 
-  const totalAmount = filteredExpenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
-  const remainingPot = totalPot - totalAmount;
+  // 리스트용 월별 필터링
+  const filteredExpenses = expenses.filter(e => {
+    const dStr = getYYYYMMDD(e.spent_date || e.created_at);
+    if (filterStartDate && dStr < filterStartDate) return false;
+    if (filterEndDate && dStr > filterEndDate) return false;
+    return true;
+  });
+
+  // 상단 잔액 카드는 전체 기간 기준으로 표시 (기간을 바꿔도 공금/잔액은 변경되지 않도록 고정)
+  const allTimeTotalAmount = expenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
+  const remainingPot = totalPot - allTimeTotalAmount;
+  const allTimeAmountForDisplay = expenses.reduce((acc, curr) => acc - Number(curr.amount), 0);
+  const balancePrefix = allTimeAmountForDisplay > 0 ? "+" : "";
+
+  // 현재 필터된 항목들 날짜별로 그룹화
+  const sortedFilteredExpenses = [...filteredExpenses].sort((a, b) => {
+    const dStrA = getYYYYMMDD(a.spent_date || a.created_at);
+    const dStrB = getYYYYMMDD(b.spent_date || b.created_at);
+    if (dStrA > dStrB) return -1;
+    if (dStrA < dStrB) return 1;
+    return b.id - a.id; 
+  });
+
+  const groupedExpenses: { [dateStr: string]: any[] } = {};
+  sortedFilteredExpenses.forEach(exp => {
+    const dStr = getYYYYMMDD(exp.spent_date || exp.created_at);
+    if (!groupedExpenses[dStr]) groupedExpenses[dStr] = [];
+    groupedExpenses[dStr].push(exp);
+  });
+
+  const shiftMonth = (offset: number) => {
+    let d = new Date();
+    if (filterStartDate && filterEndDate) {
+       d = new Date(filterStartDate);
+    }
+    d.setDate(1);
+    d.setMonth(d.getMonth() + offset);
+    const firstDay = new Date(d.getFullYear(), d.getMonth(), 1);
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    setFilterStartDate(getYYYYMMDD(firstDay));
+    setFilterEndDate(getYYYYMMDD(lastDay));
+  };
+
+  const getDisplayDuration = () => {
+    if (!filterStartDate && !filterEndDate) return "전체 기간";
+    if (filterStartDate && filterEndDate) {
+       const d1 = new Date(filterStartDate);
+       const d2 = new Date(filterEndDate);
+       const lastDayOfD1M = new Date(d1.getFullYear(), d1.getMonth() + 1, 0);
+       
+       if (d1.getDate() === 1 && d2.getTime() === lastDayOfD1M.getTime()) {
+           return `${d1.getFullYear()}년 ${d1.getMonth() + 1}월`;
+       }
+       return `${filterStartDate.replace(/-/g, '.')} ~ ${filterEndDate.replace(/-/g, '.')}`;
+    }
+    return `${filterStartDate || filterEndDate} 기준`;
+  };
 
   return (
     <div className="flex flex-col flex-1 bg-toss-bg relative min-h-screen">
-      <header className="p-4 flex items-center justify-between bg-white sticky top-0 z-10 shadow-sm border-b border-gray-100">
-        <button onClick={() => router.push("/home")} className="p-2">
+      <header className="px-4 h-14 flex items-center justify-between bg-white sticky top-0 z-10 shadow-sm border-b border-gray-100">
+        <button onClick={() => router.push("/home")} className="p-2 -ml-2 relative z-10">
           <ChevronLeft className="w-6 h-6 text-toss-text" />
         </button>
-        <div className="font-bold text-lg text-toss-text truncate flex-1 text-center px-2">{meeting?.meeting_name || "지출 내역"}</div>
-        <div className="flex items-center">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="font-bold text-lg text-toss-text truncate px-20 text-center w-full">{meeting?.meeting_name || "지출 내역"}</div>
+        </div>
+        <div className="flex items-center justify-end space-x-1 -mr-2 relative z-10">
           {isCreator && (
             <button onClick={() => router.push(`/${params.meetingToken}/settings`)} className="p-2 text-toss-text-secondary hover:text-toss-blue transition-colors">
               <Settings className="w-6 h-6" />
@@ -253,11 +339,11 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
       </header>
 
       <div className="p-6 pb-24">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-extrabold text-toss-text">결제 상세</h2>
+        <div className="flex items-center justify-center mb-6 relative">
+          <h2 className="text-xl font-extrabold text-toss-text text-center w-full">결제 상세</h2>
           <button 
             onClick={() => router.push(`/${params.meetingToken}/account`)}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-toss-text-secondary font-bold text-sm rounded-xl transition-colors shadow-sm"
+            className="absolute right-0 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-toss-text-secondary font-bold text-sm rounded-xl transition-colors shadow-sm"
           >
             총무 계좌 보기
           </button>
@@ -267,7 +353,7 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
           {totalPot > 0 || meeting?.duration_type === 'long_term' ? (
             <>
               <div className="flex items-center justify-between mb-1 relative z-10">
-                <p className="text-blue-100 font-medium">남은 공금 (모인 회비 - 지출)</p>
+                <p className="text-blue-100 font-medium">남은 공금</p>
                 <button 
                   onClick={() => router.push(`/${params.meetingToken}/funds`)} 
                   className="bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center shadow-sm backdrop-blur-sm"
@@ -276,15 +362,11 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
                 </button>
               </div>
               <div className="text-4xl font-extrabold mb-4 relative z-10">{remainingPot > 0 ? `+${remainingPot.toLocaleString()}` : remainingPot.toLocaleString()}원</div>
-              <div className="flex bg-white/20 p-3 rounded-xl mb-5 text-sm font-semibold justify-between backdrop-blur-sm relative z-10 gap-2">
-                <span className="flex-1 text-center bg-black/10 p-2 rounded-lg truncate">모인 돈: {totalPot.toLocaleString()}</span>
-                <span className="flex-1 text-center bg-black/10 p-2 rounded-lg truncate">쓴 돈: {totalAmount.toLocaleString()}</span>
-              </div>
             </>
           ) : (
             <>
-              <p className="text-blue-100 font-medium mb-1 relative z-10">총 지출 금액</p>
-              <div className="text-4xl font-extrabold mb-5 relative z-10">{totalAmount.toLocaleString()}원</div>
+              <p className="text-blue-100 font-medium mb-1 relative z-10">현재 잔액</p>
+              <div className="text-4xl font-extrabold mb-5 relative z-10">{balancePrefix}{allTimeAmountForDisplay.toLocaleString()}원</div>
             </>
           )}
           <button 
@@ -296,72 +378,104 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
           </button>
         </div>
 
-        <div className="flex justify-between items-end mb-4 px-1">
+        <div className="flex items-center justify-between mb-4 mt-6">
+          <button onClick={() => shiftMonth(-1)} className="p-2 text-gray-400 hover:text-gray-600 active:bg-gray-100 rounded-full transition-colors flex-shrink-0">
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+          
+          <button 
+            onClick={() => setShowFilterModal(true)}
+            className="text-[19px] font-bold text-toss-text hover:bg-gray-100 py-2 px-4 rounded-xl transition-colors active:scale-95"
+          >
+            {getDisplayDuration()}
+          </button>
+          
+          <button onClick={() => shiftMonth(1)} className="p-2 text-gray-400 hover:text-gray-600 active:bg-gray-100 rounded-full transition-colors flex-shrink-0">
+            <ChevronRight className="w-6 h-6" />
+          </button>
+        </div>
+
+        <div className="flex justify-between items-end mb-6 px-1">
           <h3 className="font-bold text-toss-text-secondary">상세 내역</h3>
-          {monthOptions.length > 0 && (
-            <select 
-              value={filterMonth} 
-              onChange={e => setFilterMonth(e.target.value)}
-              className="bg-gray-100 text-toss-text-secondary text-sm font-bold py-1.5 px-3 rounded-lg border-0 outline-none"
-            >
-              <option value="all">전체 기간</option>
-              {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          )}
+          <span className="text-sm font-semibold text-toss-text-secondary bg-gray-100 px-3 py-1 rounded-lg">
+            {filteredExpenses.length}건
+          </span>
         </div>
 
         {filteredExpenses.length === 0 ? (
-          <div className="text-center py-16 bg-white rounded-2xl border-2 border-dashed border-gray-200 text-gray-400">
+          <div className="text-center py-16 bg-white rounded-3xl border-2 border-dashed border-gray-200 text-gray-400">
             <ReceiptText className="w-12 h-12 mx-auto mb-3 opacity-40" />
-            <p className="font-medium">등록된 항목이 없습니다.</p>
+            <p className="font-medium">해당 월에 등록된 지출/수입이 없습니다.</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {filteredExpenses.map((exp: any) => (
-              <div 
-                key={exp.id.toString()} 
-                onClick={() => openEditModal(exp)}
-                className="bg-white p-5 rounded-2xl shadow-sm border border-gray-50 flex gap-4 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors"
-              >
-                {exp.receipt_url && (
-                    <div className="w-16 h-16 rounded-xl flex-shrink-0 bg-gray-100 overflow-hidden border border-gray-200">
-                       <img src={exp.receipt_url} alt="receipt" className="w-full h-full object-cover opacity-90" />
-                    </div>
-                )}
-                <div className="flex-1">
-                  <div className="flex justify-between items-start mb-1">
-                    <div className="font-bold text-lg text-toss-text">{exp.place_name}</div>
-                    <span className={`font-extrabold text-lg tracking-tight ${Number(exp.amount) < 0 ? 'text-toss-blue' : 'text-toss-text'}`}>
-                      {Number(exp.amount) < 0 
-                        ? `+ ${Math.abs(Number(exp.amount)).toLocaleString()}원` 
-                        : `${Number(exp.amount).toLocaleString()}원`
-                      }
-                    </span>
-                  </div>
-                  {exp.merchant_name && (
-                    <div className="flex items-center text-xs text-gray-500 mb-2 mt-0.5">
-                      <MapPin className="w-3.5 h-3.5 mr-1 flex-shrink-0" />
-                      <span className="truncate">{exp.merchant_name} {exp.merchant_address ? `(${exp.merchant_address})` : ''}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center text-sm text-toss-text-secondary bg-gray-50 p-2.5 rounded-xl mt-2 border border-gray-100">
-                    <div className="flex flex-col items-center mr-4 w-12 flex-shrink-0 pt-0.5">
-                      <div className="text-toss-text font-bold text-base mb-0.5">
-                        {exp.spent_date ? new Date(exp.spent_date).getDate() : new Date(exp.created_at).getDate()}일
+          <div className="space-y-10">
+            {Object.keys(groupedExpenses).sort((a, b) => b.localeCompare(a)).map(dateStr => {
+              const d = new Date(dateStr);
+              const dayStr = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+              
+              return (
+                <div key={dateStr}>
+                  {/* 날짜 헤더 */}
+                  <h4 className="font-extrabold text-toss-text text-lg mb-4 ml-1 flex items-baseline">
+                    <span className="text-xl">{d.getMonth() + 1}월 {d.getDate()}일</span>
+                    <span className="text-gray-400 text-sm ml-2 font-semibold bg-gray-100 px-2.5 py-0.5 rounded-md">{dayStr}요일</span>
+                  </h4>
+                  
+                  <div className="space-y-3">
+                    {groupedExpenses[dateStr].map(exp => (
+                      <div 
+                        key={exp.id.toString()} 
+                        onClick={() => openEditModal(exp)}
+                        className="bg-white p-5 rounded-3xl shadow-sm border border-gray-50 flex gap-4 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                      >
+                        {exp.receipt_url ? (
+                          <div 
+                            className="w-14 h-14 rounded-2xl flex-shrink-0 bg-gray-100 overflow-hidden border border-gray-200 shadow-inner group relative"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setLightboxImage(exp.receipt_url);
+                            }}
+                          >
+                            <img src={exp.receipt_url} alt="receipt" className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform" />
+                            <div className="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                               <Plus className="w-4 h-4 text-white" />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="w-14 h-14 rounded-2xl flex-shrink-0 bg-blue-50 flex items-center justify-center text-toss-blue">
+                             <ReceiptText className="w-6 h-6 opacity-60" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                          <div className="flex justify-between items-start gap-2 mb-0.5">
+                            <div className="font-bold text-[17px] text-toss-text truncate flex-1 min-w-0 tracking-tight">{exp.place_name}</div>
+                            <span className={`font-extrabold text-[17px] tracking-tight flex-shrink-0 ${Number(exp.amount) < 0 ? 'text-toss-blue' : 'text-red-500'}`}>
+                              {Number(exp.amount) < 0 
+                                ? `+ ${Math.abs(Number(exp.amount)).toLocaleString()}원` 
+                                : `- ${Number(exp.amount).toLocaleString()}원`
+                              }
+                            </span>
+                          </div>
+                          
+                          {exp.merchant_name && (
+                            <div className="flex items-center text-xs text-gray-500 mb-2 mt-0.5">
+                              <MapPin className="w-3 h-3 mr-1 flex-shrink-0 opacity-60" />
+                              <span className="truncate">{exp.merchant_name} {exp.merchant_address ? `(${exp.merchant_address})` : ''}</span>
+                            </div>
+                          )}
+                          
+                          <div className="flex items-center text-[13px] text-toss-text-secondary bg-gray-50/80 px-2.5 py-1.5 rounded-xl w-fit font-medium border border-gray-100">
+                            <Users className="w-3.5 h-3.5 mr-1.5 text-gray-400" />
+                            <span className="max-w-[150px] truncate">{exp.expense_members.map((em: any) => em.members.name).join(", ")}</span>
+                            <span className="text-gray-400 ml-1 font-semibold flex-shrink-0">외 {exp.expense_members.length > 1 ? exp.expense_members.length - 1 : 0}명 참여</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-400 font-medium">
-                        {exp.spent_date ? new Date(exp.spent_date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : new Date(exp.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                      </div>
-                    </div>
-                    <Users className="w-4 h-4 mr-2 flex-shrink-0" />
-                    <span className="truncate">
-                      {exp.expense_members.map((em: any) => em.members.name).join(", ")}
-                    </span>
-                    <span className="ml-auto font-semibold flex-shrink-0">{exp.expense_members.length}명</span>
+                    ))}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -388,11 +502,84 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
         </button>
       </div>
 
+      {showFilterModal && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40 animate-in fade-in duration-200" style={{maxWidth: '480px', left: '50%', transform: 'translateX(-50%)'}}>
+          <div className="bg-white rounded-t-[32px] p-6 pb-8 animate-in slide-in-from-bottom-full duration-300 transform-gpu shadow-2xl">
+            <div className="flex items-center justify-center mb-6 relative">
+              <h3 className="text-xl font-bold text-toss-text text-center w-full">기간 조회</h3>
+              <button onClick={() => setShowFilterModal(false)} className="absolute right-0 text-gray-400 font-bold p-2 z-10">닫기</button>
+            </div>
+            
+            <div className="flex items-center gap-2 mb-6">
+              <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="toss-input flex-1 min-w-0" />
+              <span className="font-bold text-gray-400">~</span>
+              <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="toss-input flex-1 min-w-0" />
+            </div>
+
+            <div className="grid grid-cols-4 gap-2 mb-8">
+              {[1, 3, 6, 12].map(m => (
+                <button 
+                  key={m}
+                  onClick={() => {
+                    const end = new Date();
+                    const start = new Date();
+                    start.setMonth(start.getMonth() - m);
+                    setFilterStartDate(getYYYYMMDD(start));
+                    setFilterEndDate(getYYYYMMDD(end));
+                  }}
+                  className="py-3 bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold rounded-xl transition-colors text-xs"
+                >
+                  {m === 12 ? '1년' : `${m}개월`}
+                </button>
+              ))}
+            </div>
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  setFilterStartDate("");
+                  setFilterEndDate("");
+                  setShowFilterModal(false);
+                }}
+                className="flex-1 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold"
+              >
+                초기화
+              </button>
+              <button 
+                onClick={() => {
+                  if (filterStartDate && filterEndDate) {
+                    const d1 = new Date(filterStartDate);
+                    const d2 = new Date(filterEndDate);
+                    const diffDays = (d2.getTime() - d1.getTime()) / (1000 * 3600 * 24);
+                    if (d1 > d2) return alert("시작일이 종료일보다 클 수 없습니다.");
+                    if (diffDays > 366) return alert("최대 1년 단위로만 조회 가능합니다.");
+                  }
+                  setShowFilterModal(false);
+                }}
+                className="flex-[2] py-4 bg-toss-blue text-white rounded-2xl font-bold shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-all"
+              >
+                적용하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAddForm && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40 animate-in fade-in duration-200" style={{maxWidth: '480px', left: '50%', transform: 'translateX(-50%)'}}>
           <div className="bg-white rounded-t-[32px] p-6 pb-8 animate-in slide-in-from-bottom-full duration-300 transform-gpu overflow-y-auto max-h-[85vh]">
-            <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6" />
-            <h3 className="text-xl font-bold mb-6 text-toss-text">{editingExpenseId ? "지출 내역 수정" : "새 지출 등록"}</h3>
+            <div className="flex items-center justify-center mb-6 relative">
+              <h3 className="text-xl font-bold text-toss-text text-center w-full">{editingExpenseId ? "지출 내역 수정" : "새 지출 등록"}</h3>
+              {editingExpenseId && (
+                <button
+                  type="button"
+                  onClick={handleDeleteExpense}
+                  className="absolute right-0 p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors flex items-center justify-center z-10"
+                >
+                  <Trash2 className="w-6 h-6" />
+                </button>
+              )}
+            </div>
             
             <div className="mb-4">
               <label className="block text-sm font-bold text-gray-700 mb-2">항목 이름</label>
@@ -568,6 +755,29 @@ export default function ExpensesPage(props: { params: Promise<{ meetingToken: st
               </button>
             </div>
           </div>
+        </div>
+      )}
+      
+      {/* Lightbox Modal */}
+      {lightboxImage && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-200 backdrop-blur-sm"
+          onClick={() => setLightboxImage(null)}
+        >
+          <button 
+            className="absolute top-6 right-6 text-white p-2 rounded-full bg-black/50 hover:bg-black/80 transition-colors"
+            onClick={(e) => { e.stopPropagation(); setLightboxImage(null); }}
+          >
+            <X className="w-6 h-6" />
+          </button>
+          
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img 
+            src={lightboxImage} 
+            alt="Receipt Fullscreen" 
+            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-300"
+            onClick={(e) => e.stopPropagation()} // Prevent clicking image from closing
+          />
         </div>
       )}
     </div>

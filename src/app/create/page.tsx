@@ -80,19 +80,22 @@ export default function CreateMeeting() {
 
   return (
     <div className="flex flex-col flex-1 bg-white relative min-h-screen">
-      <header className="p-4 flex items-center border-b border-gray-100 relative">
-        <button onClick={() => step === 1 ? router.push("/home") : setStep(step - 1)} className="p-2 absolute left-2">
+      <header className="px-4 h-14 flex items-center justify-between bg-white sticky top-0 z-10 border-b border-gray-100">
+        <button onClick={() => step === 1 ? router.push("/home") : setStep(step - 1)} className="p-2 -ml-2 relative z-10">
           <ChevronLeft className="w-6 h-6 text-toss-text" />
         </button>
-        <div className="flex-1 text-center font-bold text-toss-text text-lg">
-          새 모임 만들기 <span className="text-gray-400 text-sm font-semibold ml-1">({step}/5)</span>
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="font-bold text-toss-text text-lg text-center w-full px-20 truncate">
+            새 모임 만들기 <span className="text-gray-400 text-sm font-semibold ml-1">({step}/5)</span>
+          </div>
         </div>
+        <div className="w-10"></div>
       </header>
 
       <div className="p-6 pb-32 flex flex-col flex-1 overflow-y-auto">
         {step === 1 && (
           <div className="flex flex-col h-full animate-in slide-in-from-right-4 duration-300 fill-mode-both">
-            <h2 className="text-2xl font-bold mb-6 leading-snug">모임의 기본 정보를<br/>알려주세요</h2>
+            <h2 className="text-2xl font-bold mb-6 leading-snug text-center w-full">모임의 기본 정보를<br/>알려주세요</h2>
             
             <div className="flex flex-col items-center mb-8">
                <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImagePick} />
@@ -133,7 +136,7 @@ export default function CreateMeeting() {
 
         {step === 2 && (
           <div className="flex flex-col h-full animate-in slide-in-from-right-4 duration-300 fill-mode-both">
-            <h2 className="text-2xl font-bold mb-6 leading-snug">몇 명이<br/>함께하나요?</h2>
+            <h2 className="text-2xl font-bold mb-6 leading-snug text-center w-full">몇 명이<br/>함께하나요?</h2>
             <div className="flex flex-col items-center justify-center flex-1 pb-20">
               <div className="flex items-center justify-center space-x-8 mb-6">
                 <button 
@@ -155,7 +158,7 @@ export default function CreateMeeting() {
 
         {step === 3 && (
           <div className="flex flex-col h-full animate-in slide-in-from-right-4 duration-300 fill-mode-both">
-            <h2 className="text-2xl font-bold mb-6">참여자 등록</h2>
+            <h2 className="text-2xl font-bold mb-6 text-center w-full">참여자 등록</h2>
             <div className="space-y-4 pt-2">
               {members.map((m, idx) => (
                 <div key={idx} className="relative">
@@ -174,7 +177,7 @@ export default function CreateMeeting() {
 
         {step === 4 && (
           <div className="flex flex-col h-full animate-in slide-in-from-right-4 duration-300 fill-mode-both">
-            <h2 className="text-2xl font-bold mb-4">공금(회비)를<br/>미리 걷을 예정인가요?</h2>
+            <h2 className="text-2xl font-bold mb-4 text-center w-full">공금(회비)를<br/>미리 걷을 예정인가요?</h2>
             
             <div className="flex space-x-3 mb-8">
                <button 
@@ -223,7 +226,7 @@ export default function CreateMeeting() {
                 </div>
 
                 <div className="bg-gray-50 border border-gray-100 rounded-2xl p-5 mb-4">
-                   <h3 className="font-bold text-toss-text mb-4 text-sm">정기 납부 일정을 설정할까요?</h3>
+                   <h3 className="font-bold text-toss-text mb-4 text-sm text-center w-full">정기 납부 일정을 설정할까요?</h3>
                    
                    <div className="flex space-x-2 mb-4">
                      <button 
@@ -294,7 +297,7 @@ export default function CreateMeeting() {
 
         {step === 5 && (
           <div className="flex flex-col h-full animate-in slide-in-from-right-4 duration-300 fill-mode-both">
-            <h2 className="text-2xl font-bold mb-4 leading-snug">정산받을 계좌를<br/>등록해주세요</h2>
+            <h2 className="text-2xl font-bold mb-4 leading-snug text-center w-full">정산받을 계좌를<br/>등록해주세요</h2>
             <p className="text-sm font-medium text-toss-text-secondary mb-8 bg-blue-50 p-3 rounded-lg text-toss-blue">
               최종 공유될 청구서 이미지에 계좌번호가 표시됩니다.
             </p>

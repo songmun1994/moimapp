@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Receipt, Plus, History, ChevronRight, Bell, X, Check } from "lucide-react";
-import { getDueMeetingsAction, approveMeetingDuesAction } from "@/app/actions";
+import { getDueMeetingsAction, approveMeetingDuesAction, getMeetingsBaseInfoAction } from "@/app/actions";
 
 export default function Home() {
   const router = useRouter();
@@ -16,7 +16,21 @@ export default function Home() {
       setRecentMeetings(parsed);
       
       if (parsed.length > 0) {
-        getDueMeetingsAction(parsed.map((m: any) => m.id)).then(dues => {
+        const tokens = parsed.map((m: any) => m.id);
+        
+        getMeetingsBaseInfoAction(tokens).then(baseInfos => {
+          const synced = parsed.map((m: any) => {
+            const serverInfo = baseInfos.find((info: any) => info.public_token === m.id);
+            if (serverInfo) {
+              return { ...m, name: serverInfo.meeting_name, cover: serverInfo.cover_image_url || m.cover };
+            }
+            return m;
+          });
+          setRecentMeetings(synced);
+          localStorage.setItem("recent_meetings", JSON.stringify(synced));
+        });
+
+        getDueMeetingsAction(tokens).then(dues => {
           const todayStr = new Date().toDateString();
           const filtered = dues.filter((d: any) => {
             return localStorage.getItem(`due_${d.public_token}_${todayStr}`) !== "true";
@@ -35,7 +49,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col min-h-screen bg-toss-bg relative">
-      <header className="px-6 pt-12 pb-4">
+      <header className="px-6 pt-12 pb-4 text-center">
         <h1 className="text-2xl font-bold text-toss-text mb-8 leading-snug">어떤 모임을<br />정산할까요?</h1>
       </header>
 

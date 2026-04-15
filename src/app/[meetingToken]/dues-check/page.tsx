@@ -56,7 +56,8 @@ export default function DuesCheckPage(props: { params: Promise<{ meetingToken: s
     if (submitting) return;
     setSubmitting(true);
     
-    const checkedCount = meeting.members.filter((m: any) => stateObj[m.id]).length;
+    const checkedMemberIds = meeting.members.filter((m: any) => stateObj[m.id]).map((m: any) => m.id);
+    const checkedCount = checkedMemberIds.length;
     
     // 만약 한 명도 체크되지 않은 상태에서 버튼을 강제로 열었다면 예외처리
     if (checkedCount === 0) {
@@ -66,13 +67,17 @@ export default function DuesCheckPage(props: { params: Promise<{ meetingToken: s
     }
 
     try {
-      await approveMeetingDuesAction(params.meetingToken, checkedCount);
+      await approveMeetingDuesAction(params.meetingToken, checkedMemberIds);
       
       // 알림 다시 안 뜨게 일일 로컬 스토리지 무효화 처리
       const todayStr = new Date().toDateString();
       localStorage.setItem(`due_${params.meetingToken}_${todayStr}`, "true");
       
-      alert(`완료처리 되었습니다. (+${(Number(meeting.upfront_dues) * checkedCount).toLocaleString()}원 누적)`);
+      const duesPerPerson = meeting?.meeting_schedules?.recurring_amount 
+        ? Number(meeting.meeting_schedules.recurring_amount) 
+        : Number(meeting?.upfront_dues || 0);
+
+      alert(`완료처리 되었습니다. (+${(duesPerPerson * checkedCount).toLocaleString()}원 누적)`);
       router.replace(`/${params.meetingToken}/expenses`);
     } catch (e) {
       console.error(e);
@@ -83,7 +88,9 @@ export default function DuesCheckPage(props: { params: Promise<{ meetingToken: s
 
   if (loading) return <div className="flex h-screen items-center justify-center font-bold text-gray-400">Loading...</div>;
 
-  const duesPerPerson = Number(meeting?.upfront_dues || 0);
+  const duesPerPerson = meeting?.meeting_schedules?.recurring_amount 
+    ? Number(meeting.meeting_schedules.recurring_amount) 
+    : Number(meeting?.upfront_dues || 0);
   const checkedMembersCount = Object.values(checked).filter(Boolean).length;
   const totalMembersCount = meeting?.members?.length || 0;
 
